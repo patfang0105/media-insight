@@ -63,6 +63,7 @@ button{cursor:pointer;font-family:inherit;}
 .filter-bar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;
   background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;}
 .filter-bar label{display:flex;gap:6px;align-items:center;margin:0;font-weight:400;color:var(--text);}
+.filter-bar select{width:auto;padding:5px 8px;font-size:12px;}
 .filter-bar .sp{flex:1;}
 .selcount{color:var(--blue-dark);font-weight:600;}
 .art{background:#fff;border:1px solid var(--line);border-radius:9px;padding:14px 16px;margin-bottom:10px;}
@@ -72,14 +73,14 @@ button{cursor:pointer;font-family:inherit;}
 .art h3{font-size:14px;margin:0;line-height:1.5;flex:1;}
 .art h3 a{color:var(--text);text-decoration:none;}
 .art h3 a:hover{color:var(--blue);text-decoration:underline;}
-.meta{margin:7px 0 0 25px;font-size:12px;color:var(--muted);}
+.meta{margin:7px 0 0 0;font-size:12px;color:var(--muted);}
 .tag{display:inline-block;border-radius:4px;padding:1px 7px;font-size:11px;margin-right:6px;}
 .tag.rss{background:#dcfce7;color:#166534;} .tag.gdelt{background:#dbeafe;color:#1e40af;}
 .tag.pay{background:#fef3c7;color:#92400e;} .tag.open{background:#f1f5f9;color:#475569;}
 .tag.digest{background:#ede9fe;color:#5b21b6;}
-.summ{margin:9px 0 0 25px;font-size:13px;color:#374151;background:#f9fafb;
+.summ{margin:9px 0 0 0;font-size:13px;color:#374151;background:#f9fafb;
   border-left:3px solid #e5e7eb;padding:8px 11px;border-radius:0 6px 6px 0;}
-.card-actions{margin:9px 0 0 25px;display:flex;gap:12px;flex-wrap:wrap;font-size:12px;}
+.card-actions{margin:9px 0 0 0;display:flex;gap:12px;flex-wrap:wrap;font-size:12px;}
 .card-actions a{color:var(--blue);text-decoration:none;}
 .card-actions a:hover{text-decoration:underline;}
 .notice{background:#fffbeb;border:1px solid #fde68a;color:#78350f;border-radius:8px;
@@ -118,7 +119,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
 
 <header>
   <h1><span>Media Insight</span> · 境外媒体舆情跟踪系统 <span class="badge">GitHub Pages 静态版</span></h1>
-  <div class="sub">输入话题 → 检索境外媒体报道与评论 → 勾选文章 → 一键生成中文总结提炼，结果可下载</div>
+  <div class="sub">输入话题 → <b>RSS 精选源 + 实时检索</b> → 自动提炼全部命中报道（逐篇中文摘译与要点）→ 结果直接在本页查看</div>
 </header>
 
 <div class="panel" id="historyPanel" style="padding:14px 20px">
@@ -162,8 +163,8 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <div>
       <label>检索源</label>
       <div class="checks" style="margin:8px 0 0">
-        <label><input type="checkbox" id="srcRss" checked> RSS 精选源（国际媒体+智库，含摘要）</label>
-        <label><input type="checkbox" id="srcGdelt"> GDELT 全球媒体库（可选，易限流）</label>
+        <label><input type="checkbox" id="srcRss" checked> RSS 精选源（你的订阅快照，含摘要）</label>
+        <label><input type="checkbox" id="srcGdelt" checked> 实时检索 GDELT 全球媒体库（RSS 之外的新报道）</label>
       </div>
     </div>
   </div>
@@ -173,7 +174,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <span class="hint" id="dataNote" style="margin:0"></span>
   </div>
   <div class="hint" style="margin-top:8px">
-    本工具<b>只读引用</b>你 RSS 站点公开的 <code>rss-data.json</code>，不写入、不修改源站任何文件；数据在本机缓存 2 小时并遵循源站 ETag（304 条件请求），源站短暂不可用时自动降级到本机快照且不会反复重试。GDELT 有频率限制，失败会自动跳过并如实提示。
+    <b>两类来源的区别</b>：<b>RSS 精选源</b>是你站点公开的 <code>rss-data.json</code>（一批已聚合好的文章），工具只按话题在本机筛选，<b>不会实时上网抓取</b>；<b>实时检索 GDELT</b> 才会在每次检索时向全球媒体库发请求，取回 RSS 之外的新报道（清单中带「实时检索 GDELT」标签）。RSS 数据在本机缓存 2 小时并遵循源站 ETag，只读 GET、不写入源站、故障时降级到本机快照；GDELT 有 5 秒频率限制，已做节流与重试，失败会在概览如实提示。想核对新内容可勾「仅看实时检索」。
   </div>
 </div>
 
@@ -182,6 +183,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
   <div class="panel">
     <h2 class="sec">2 · 报道概览与热度</h2>
     <div class="stat-grid" id="stats"></div>
+    <div class="hint" id="sourceNote" style="margin:-2px 0 10px"></div>
     <div class="chart-box"><svg id="dayChart" width="100%" height="150"></svg></div>
     <div class="hint" id="heatNote"></div>
     <h2 class="sec" style="margin-top:20px">来源排行</h2>
@@ -192,44 +194,41 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <h2 class="sec">3 · 关键报道清单（<span id="artCount"></span> 篇，按相关度排序）</h2>
     <div class="filter-bar">
       <label><input type="checkbox" id="openOnly" onchange="renderArticles()"> 仅显示可公开访问</label>
-      <button class="btn ghost sm" onclick="selectAll(true)">全选可见</button>
-      <button class="btn ghost sm" onclick="selectAll(false)">清空选择</button>
-      <button class="btn ghost sm" onclick="selectOpen()">仅选公开报道</button>
+      <label><input type="checkbox" id="freshOnly" onchange="renderArticles()"> 仅看实时检索（GDELT）</label>
       <span class="sp"></span>
-      <span>已选 <span class="selcount" id="selCount">0</span> 篇</span>
-      <button class="btn" id="digestBtn" onclick="doDigest()">✦ 总结提炼选中文章</button>
+      <span class="hint" style="margin:0">清单内全部报道已自动纳入提炼，无需选择</span>
+    </div>
+    <div class="hint" style="margin:-4px 0 10px">
+      下方「4 · 总结提炼结果」会为<b>每一篇</b>生成中文标题、中文要点、中文摘译与英文原文关键句。带「实时检索 GDELT」标签的是本次新检索到的报道；这类条目原文只提供标题与链接、无公开摘要，故只给出中文标题译名。筛选只影响清单显示，不改变提炼范围。
     </div>
     <div id="articles"></div>
-    <div style="text-align:center;margin-top:14px">
-      <button class="btn" onclick="doDigest()">✦ 总结提炼选中文章</button>
-    </div>
     <div class="notice">
       <b>关于付费内容（合规声明）</b>：部分财经媒体（WSJ、FT、经济学人、彭博、外交事务等）需订阅才能查看全文。本工具<b>不绕过付费验证</b>，仅使用其公开提供的 RSS 摘要/导语，并在每条上标注访问级别。可点「Textise 文本视图」尝试在你自己的浏览器中阅读（有的能看到、有的仍看不到）。材料仅供内部研判，请遵守原文版权。
     </div>
   </div>
 
   <div class="panel" id="digestPanel">
-    <h2 class="sec">4 · 总结提炼结果</h2>
-    <div class="hint" id="digestHint">勾选上方文章后点「总结提炼」，即可在此生成中文摘译与观点提炼；结果可下载为 Markdown / HTML 文档。</div>
-    <div id="digestResult" class="hidden"></div>
-    <div class="actions" id="digestActions" style="display:none;margin-top:12px">
-      <button class="btn" onclick="downloadDigest('md')">下载提炼报告 Markdown</button>
-      <button class="btn ghost" onclick="downloadDigest('html')">下载提炼报告 HTML</button>
+    <h2 class="sec">4 · 总结提炼结果 <span class="badge">检索后自动提炼全部报道</span></h2>
+    <div class="filter-bar">
+      <label><input type="checkbox" id="autoDigest" checked onchange="onAutoCfgChange()"> 检索后自动生成提炼</label>
+      <span class="sp"></span>
+      <button class="btn ghost sm" id="regenBtn" onclick="autoDigest(true)">↻ 重新生成全部</button>
     </div>
+    <div class="hint" id="autoCfgNote" style="margin-bottom:8px"></div>
+    <div class="hint" id="digestHint">完成一次检索后，系统会为<b>全部命中报道</b>逐篇生成中文摘译与要点、共识线索与立场差异；报告直接在本区完整呈现，可向下滚动查看。</div>
+    <div id="digestResult" class="hidden"></div>
   </div>
 
   <div class="panel">
-    <h2 class="sec">5 · 文档下载与高级设置</h2>
+    <h2 class="sec">5 · 高级设置</h2>
     <div class="actions">
-      <button class="btn ghost" onclick="downloadPack('md')">下载素材包 Markdown</button>
-      <button class="btn ghost" onclick="downloadPack('html')">下载素材包 HTML</button>
       <button class="btn ghost" onclick="togglePrompt()">显示 AI 分析指令</button>
       <button class="btn ghost" onclick="toggleLLM()">LLM 增强设置</button>
     </div>
 
     <div id="llmBox" class="hidden" style="margin-top:16px">
       <h2 class="sec" style="font-size:14px">LLM 增强（可选）</h2>
-      <div class="hint" style="margin-bottom:10px">不填也能用：默认走内置免配置提炼。填写后点「总结提炼」会自动调用模型生成更高质量的中文摘译；失败时自动降级为内置提炼并提示。</div>
+      <div class="hint" style="margin-bottom:10px">不填也能用：默认走内置免配置提炼。填写后自动生成提炼时会调用模型生成更高质量的中文摘译；篇数很多时模型可能超限，失败会自动降级为内置提炼并提示。</div>
       <div class="llm-grid">
         <div><label>API Base URL</label><input type="text" id="llmBase" placeholder="https://api.openai.com/v1"></div>
         <div><label>API Key</label><input type="password" id="llmKey" placeholder="sk-..."></div>
@@ -244,7 +243,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     </div>
 
     <div id="promptBox" class="hidden" style="margin-top:16px">
-      <label>AI 分析指令（复制到任意 AI 对话，配合素材包使用）</label>
+      <label>AI 分析指令（复制到任意 AI 对话，配合上方报告使用）</label>
       <textarea id="aiPrompt" class="prompt" readonly></textarea>
       <div class="actions" style="margin-top:8px"><button class="btn ghost sm" onclick="copyPrompt()">复制指令</button></div>
     </div>
@@ -253,7 +252,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
 </section>
 
 <footer>
-  数据源：用户自建 RSS 精选聚合站（只读 GET） · GDELT DOC API · MyMemory 翻译接口<br>
+  数据源：用户自建 RSS 精选聚合站（只读 GET） · GDELT 全球媒体库（实时检索） · Google gtx / MyMemory 翻译接口<br>
   静态托管于 GitHub Pages，独立仓库、独立站点；无服务端、无数据采集，检索与提炼均在你的浏览器内完成，不会改变 RSS 站点的运行方式。
 </footer>
 
