@@ -20,6 +20,7 @@ h1 span{color:var(--blue);}
 .sub{color:var(--muted);font-size:13px;}
 .badge{display:inline-block;background:#eff6ff;color:var(--blue-dark);border:1px solid #bfdbfe;
   border-radius:20px;padding:2px 10px;font-size:12px;margin-left:8px;vertical-align:middle;}
+.badge.ver{background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-weight:600;}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;
   padding:20px 22px;margin-bottom:16px;box-shadow:0 1px 3px rgba(16,24,40,.04);}
 h2.sec{font-size:16px;margin:0 0 14px;padding-left:10px;border-left:4px solid var(--blue);}
@@ -118,8 +119,9 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
 <div class="wrap">
 
 <header>
-  <h1><span>Media Insight</span> · 境外媒体舆情跟踪系统 <span class="badge">GitHub Pages 静态版</span></h1>
+  <h1><span>Media Insight</span> · 境外媒体舆情跟踪系统 <span class="badge">GitHub Pages 静态版</span><span class="badge ver" title="看到此版本标识即为最新版本">v2.1 · 2026-11-20</span></h1>
   <div class="sub">输入话题 → <b>RSS 精选源 + 实时检索</b> → 自动提炼全部命中报道（逐篇中文摘译与要点）→ 结果直接在本页查看</div>
+  <div class="sub" style="margin-top:5px;font-size:12px;opacity:.85">若页面没有右上角的绿色版本标识、或仍显示旧的按钮，请按 <b>Ctrl + F5</b>（Mac 为 <b>Cmd + Shift + R</b>）强制刷新一次。</div>
 </header>
 
 <div class="panel" id="historyPanel" style="padding:14px 20px">
@@ -257,6 +259,6 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
 </footer>
 
 </div>
-<script src="app.js"></script>
+<script src="app.js?v=20261120b"></script>
 </body>
 </html>
