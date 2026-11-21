@@ -1,0 +1,44 @@
+name: 更新全球新闻池
+
+on:
+  schedule:
+    # 每 3 小时的第 17 分钟运行（错开整点，降低与其他任务撞车的概率）
+    - cron: '17 */3 * * *'
+  workflow_dispatch:      # 允许在 Actions 页面手动点「Run workflow」立即更新
+
+permissions:
+  contents: write         # 需要把新生成的 news-data.json 提交回仓库
+
+concurrency:
+  group: update-news-pool
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 抓取境外报道并生成新闻池
+        # 抓取发生在 GitHub 的境外服务器上，结果写进仓库；
+        # 页面随后同域读取 news-data.json，访问者浏览器无需直连 GDELT。
+        run: python3 scripts/fetch_news.py
+
+      - name: 提交新闻池数据
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add news-data.json
+          if git diff --cached --quiet; then
+            echo "新闻池无变化，跳过提交"
+          else
+            git commit -m "chore: 更新全球新闻池 $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+            git push
+          fi

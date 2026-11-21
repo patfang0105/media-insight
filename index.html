@@ -77,6 +77,7 @@ button{cursor:pointer;font-family:inherit;}
 .meta{margin:7px 0 0 0;font-size:12px;color:var(--muted);}
 .tag{display:inline-block;border-radius:4px;padding:1px 7px;font-size:11px;margin-right:6px;}
 .tag.rss{background:#dcfce7;color:#166534;} .tag.gdelt{background:#dbeafe;color:#1e40af;}
+.tag.pool{background:#ede9fe;color:#5b21b6;}
 .tag.pay{background:#fef3c7;color:#92400e;} .tag.open{background:#f1f5f9;color:#475569;}
 .tag.digest{background:#ede9fe;color:#5b21b6;}
 .summ{margin:9px 0 0 0;font-size:13px;color:#374151;background:#f9fafb;
@@ -119,8 +120,8 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
 <div class="wrap">
 
 <header>
-  <h1><span>Media Insight</span> · 境外媒体舆情跟踪系统 <span class="badge">GitHub Pages 静态版</span><span class="badge ver" title="看到此版本标识即为最新版本">v2.1 · 2026-11-20</span></h1>
-  <div class="sub">输入话题 → <b>RSS 精选源 + 实时检索</b> → 自动提炼全部命中报道（逐篇中文摘译与要点）→ 结果直接在本页查看</div>
+  <h1><span>Media Insight</span> · 境外媒体舆情跟踪系统 <span class="badge">GitHub Pages 静态版</span><span class="badge ver" title="看到此版本标识即为最新版本">v2.3 · 2026-11-21</span></h1>
+  <div class="sub">输入话题 → <b>全球新闻池（境外服务器每 3 小时抓取，独立于 RSS 站）</b> → 自动提炼全部命中报道（逐篇中文摘译与要点）→ 结果直接在本页查看</div>
   <div class="sub" style="margin-top:5px;font-size:12px;opacity:.85">若页面没有右上角的绿色版本标识、或仍显示旧的按钮，请按 <b>Ctrl + F5</b>（Mac 为 <b>Cmd + Shift + R</b>）强制刷新一次。</div>
 </header>
 
@@ -165,8 +166,9 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <div>
       <label>检索源</label>
       <div class="checks" style="margin:8px 0 0">
-        <label><input type="checkbox" id="srcRss" checked> RSS 精选源（你的订阅快照，含摘要）</label>
-        <label><input type="checkbox" id="srcGdelt" checked> 实时检索 GDELT 全球媒体库（RSS 之外的新报道）</label>
+        <label><input type="checkbox" id="srcPool" checked> <b>全球新闻池</b>（推荐 · 境外服务器抓取，独立于 RSS）</label>
+        <label><input type="checkbox" id="srcRss"> RSS 精选源（可选 · 你的订阅快照）</label>
+        <label><input type="checkbox" id="srcGdelt"> 实时检索 GDELT（可选 · 国内常限流）</label>
       </div>
     </div>
   </div>
@@ -176,7 +178,8 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <span class="hint" id="dataNote" style="margin:0"></span>
   </div>
   <div class="hint" style="margin-top:8px">
-    <b>两类来源的区别</b>：<b>RSS 精选源</b>是你站点公开的 <code>rss-data.json</code>（一批已聚合好的文章），工具只按话题在本机筛选，<b>不会实时上网抓取</b>；<b>实时检索 GDELT</b> 才会在每次检索时向全球媒体库发请求，取回 RSS 之外的新报道（清单中带「实时检索 GDELT」标签）。RSS 数据在本机缓存 2 小时并遵循源站 ETag，只读 GET、不写入源站、故障时降级到本机快照；GDELT 有 5 秒频率限制，已做节流与重试，失败会在概览如实提示。想核对新内容可勾「仅看实时检索」。
+    <b>三类检索源的区别</b>：<b>全球新闻池</b>由本仓库的 GitHub Actions 每 3 小时在<b>境外服务器</b>抓取 GDELT 全球媒体库（覆盖地缘、经贸、科技、金融、能源、气候等 21 类长期话题），结果写入本仓库的 <code>news-data.json</code>；页面读取的是<b>自己网站里的文件</b>，不跨境、无 CORS 限制、不受 GDELT 5 秒限流影响，也<b>完全不触碰你的 my-rss-blog</b>。<b>RSS 精选源</b>是你订阅站公开的 <code>rss-data.json</code>，只按话题在本机筛选，只读 GET、本机缓存 2 小时并遵循源站 ETag。<b>实时检索 GDELT</b> 由访问者浏览器直接请求境外接口，国内网络下常被限流或不可达，失败会在概览如实提示。<br>
+    <b>只勾「全球新闻池」即可完全不依赖 RSS 检索境外新报道</b>（默认就是如此，清单带「全球新闻池」标签）。新闻池按预设话题定期抓取，冷门或突发话题可能尚未入池，此时可加勾「实时检索 GDELT」或稍后再试；数据生成时间显示在「2 · 报道概览与热度」。点「↻ 刷新数据源」会重新读取新闻池文件，只有勾选了 RSS 时才会额外请求你的订阅站。
   </div>
 </div>
 
@@ -196,12 +199,12 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <h2 class="sec">3 · 关键报道清单（<span id="artCount"></span> 篇，按相关度排序）</h2>
     <div class="filter-bar">
       <label><input type="checkbox" id="openOnly" onchange="renderArticles()"> 仅显示可公开访问</label>
-      <label><input type="checkbox" id="freshOnly" onchange="renderArticles()"> 仅看实时检索（GDELT）</label>
+      <label><input type="checkbox" id="freshOnly" onchange="renderArticles()"> 仅看非 RSS 新报道（新闻池 + 实时检索）</label>
       <span class="sp"></span>
       <span class="hint" style="margin:0">清单内全部报道已自动纳入提炼，无需选择</span>
     </div>
     <div class="hint" style="margin:-4px 0 10px">
-      下方「4 · 总结提炼结果」会为<b>每一篇</b>生成中文标题、中文要点、中文摘译与英文原文关键句。带「实时检索 GDELT」标签的是本次新检索到的报道；这类条目原文只提供标题与链接、无公开摘要，故只给出中文标题译名。筛选只影响清单显示，不改变提炼范围。
+      下方「4 · 总结提炼结果」会为<b>每一篇</b>生成中文标题、中文要点、中文摘译与英文原文关键句。带「全球新闻池」「实时检索 GDELT」标签的是 RSS 之外的境外新报道；这类条目原文只提供标题与链接、无公开摘要，故只给出中文标题译名，不据此推断正文。筛选只影响清单显示，不改变提炼范围。
     </div>
     <div id="articles"></div>
     <div class="notice">
@@ -254,11 +257,11 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
 </section>
 
 <footer>
-  数据源：用户自建 RSS 精选聚合站（只读 GET） · GDELT 全球媒体库（实时检索） · Google gtx / MyMemory 翻译接口<br>
-  静态托管于 GitHub Pages，独立仓库、独立站点；无服务端、无数据采集，检索与提炼均在你的浏览器内完成，不会改变 RSS 站点的运行方式。
+  数据源：全球新闻池（GitHub Actions 境外抓取 · 同域 news-data.json） · 可选 RSS 精选聚合站（只读 GET） · 可选 GDELT 实时检索 · Google gtx / MyMemory 翻译接口<br>
+  静态托管于 GitHub Pages，独立仓库、独立站点；页面无服务端，检索与提炼均在访问者浏览器内完成。新闻池抓取与写库由 GitHub Actions 在本仓库内完成，不会改变 my-rss-blog 的运行方式。
 </footer>
 
 </div>
-<script src="app.js?v=20261120b"></script>
+<script src="app.js?v=20261121a"></script>
 </body>
 </html>

@@ -2,10 +2,12 @@
 
 /* ============================================================
  * Media Insight · 纯静态版核心逻辑
- * 数据源：用户自建 RSS 聚合站 / GDELT DOC API / MyMemory 翻译
+ * 数据源：全球新闻池（同域 news-data.json，GitHub Actions 境外抓取）
+ *         / 用户自建 RSS 聚合站 / GDELT DOC API / Google gtx 翻译
  * 全部在浏览器内运行，无服务端
  * ============================================================ */
 
+const POOL_URL = 'news-data.json';   // 与页面同域，国内浏览器可直接读取
 const RSS_URL = 'https://patfang0105.github.io/my-rss-blog/rss-data.json';
 const GDELT_API = 'https://api.gdeltproject.org/api/v2/doc/doc';
 const MYMEMORY = 'https://api.mymemory.translated.net/get';
@@ -27,6 +29,7 @@ const PAYWALL_NAMES = [
 const TIMESPAN_GDELT = { '24h':'24h', '7d':'1w', '30d':'1m', '180d':'3m' };
 const TIMESPAN_DAYS  = { '24h':1, '7d':7, '30d':30, '180d':180 };
 const TIMESPAN_LABEL = { '24h':'最近24小时','7d':'最近7天','30d':'最近30天','180d':'最近180天' };
+const SRC_LABEL = { pool:'全球新闻池', rss:'RSS 精选源', gdelt:'实时检索 GDELT' };
 
 const STOPWORDS = new Set(('the a an and or but if of to in on at by for from with as is are was were be been being '
   + 'it its this that these those there here their they them he she his her we our you your i me my '
@@ -51,6 +54,65 @@ const state = {
   digestSeq: 0,         // 任务序号，新检索会让旧任务的结果作废
   pendingAuto: false    // 有新检索在等待自动提炼
 };
+
+/* ---------------- 全球新闻池：页面同域只读 ----------------
+ * 抓取由 GitHub Actions 在境外服务器每 3 小时完成，结果写入仓库的
+ * news-data.json。浏览器只读本站点自己的文件，因此不跨境、无 CORS、
+ * 不受 GDELT 5 秒限流影响，也完全不触碰 my-rss-blog。
+ * --------------------------------------------------------- */
+const POOL_SNAPSHOT_KEY = 'mi_pool_snapshot_v1';
+let poolCache = null;
+let poolMeta = { at:0, count:0, sources:0, generated:'', stale:false, source:'', warnings:[] };
+
+function mapPool(items){
+  return (items || []).map(it => ({
+    origin: 'pool',
+    title: stripHtml(it.title || ''),
+    link: it.link || '',
+    source: stripHtml(it.source || '') || '未知来源',
+    author: '',
+    date: it.date || '',
+    summary: stripHtml(it.summary || ''),
+    country: stripHtml(it.country || ''),
+    topic: stripHtml(it.topic || ''),        // 抓取时的中文主题标签，参与相关度打分
+    keywords: stripHtml(it.keywords || '')   // 英文关键词，提升中文话题译词的命中率
+  }));
+}
+async function fetchPool(force){
+  if(!force && poolCache) return poolCache;
+  try{
+    // 同域静态文件，尊重 ETag；强制刷新时才加时间戳绕过缓存
+    const url = POOL_URL + (force ? '?t=' + Date.now() : '');
+    const r = await fetchWithTimeout(url, {cache:'default'}, 20000);
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    if(!d || !Array.isArray(d.articles)) throw new Error('新闻池数据格式异常');
+    poolCache = mapPool(d.articles);
+    poolMeta = {
+      at: Date.now(), count: poolCache.length,
+      sources: d.sources || new Set(poolCache.map(a => a.source)).size,
+      generated: d.generated_at || '', stale: !!d.stale,
+      source: '新闻池文件', warnings: Array.isArray(d.warnings) ? d.warnings : []
+    };
+    try{
+      localStorage.setItem(POOL_SNAPSHOT_KEY,
+        JSON.stringify({at:Date.now(), meta:poolMeta, items:poolCache}));
+    }catch(e){ /* 浏览器配额不足时静默跳过 */ }
+    return poolCache;
+  }catch(e){
+    // 同域文件偶发不可读：降级到本机快照，不反复重试
+    try{
+      const o = JSON.parse(localStorage.getItem(POOL_SNAPSHOT_KEY) || 'null');
+      if(o && o.items && o.items.length){
+        poolCache = o.items;
+        poolMeta = Object.assign({}, o.meta, {stale:true, source:'本机快照'});
+        state.warnings.push('新闻池文件暂不可读（' + e.message + '），已改用本机快照。');
+        return poolCache;
+      }
+    }catch(e2){}
+    throw e;
+  }
+}
 
 /* ---------------- 通用工具 ---------------- */
 
@@ -276,15 +338,22 @@ async function refreshDataSource(){
   const btn = document.getElementById('refreshBtn');
   const note = document.getElementById('dataNote');
   btn.disabled = true;
-  note.textContent = '正在从源站刷新…';
+  note.textContent = '正在刷新数据源…';
+  const parts = [];
   try{
-    await fetchRss(true);
-    note.textContent = `已更新 ${rssMeta.count} 篇 · ${new Date(rssMeta.at).toLocaleString('zh-CN')}`;
-  }catch(e){
-    note.textContent = '刷新失败：' + e.message + '（工具仍可使用本机缓存）';
-  }finally{
-    btn.disabled = false;
+    const p = await fetchPool(true);
+    parts.push(`全球新闻池 ${p.length} 篇（生成于 ${poolMeta.generated || '—'}）`);
+  }catch(e){ parts.push('新闻池刷新失败：' + e.message); }
+  // 只有勾选了 RSS 才去请求你的订阅站，保持零影响
+  const rssEl = document.getElementById('srcRss');
+  if(rssEl && rssEl.checked){
+    try{
+      const r = await fetchRss(true);
+      parts.push(`RSS 精选源 ${r.length} 篇`);
+    }catch(e){ parts.push('RSS 刷新失败：' + e.message); }
   }
+  note.textContent = parts.join(' · ');
+  btn.disabled = false;
 }
 let lastGdeltAt = 0;
 async function gdeltThrottle(){
@@ -342,7 +411,10 @@ async function fetchGdelt(q, timespan){
 function scoreArticle(a, terms){
   const title = (a.title || '').toLowerCase();
   const summ  = (a.summary || '').toLowerCase();
-  const extra = ((a.author || '') + ' ' + (a.source || '')).toLowerCase();
+  // 新闻池条目带有抓取时的中文主题标签与英文关键词，一并参与匹配，
+  // 让中文话题译成英文后更容易命中相关报道
+  const extra = ((a.author || '') + ' ' + (a.source || '') + ' ' +
+                 (a.topic || '') + ' ' + (a.keywords || '')).toLowerCase();
   let s = 0, hitAll = true;
   for(const t of terms){
     let h = 0;
@@ -356,7 +428,7 @@ function scoreArticle(a, terms){
 }
 function buildStats(articles){
   const byDay = {}, bySrc = {};
-  let paywall = 0, withSummary = 0, realtime = 0, fromRss = 0;
+  let paywall = 0, withSummary = 0, poolCount = 0, realtime = 0, fromRss = 0;
   for(const a of articles){
     if(a.date){
       const d = isoDay(a.date);
@@ -366,7 +438,9 @@ function buildStats(articles){
     bySrc[s] = (bySrc[s] || 0) + 1;
     if(a.paywall) paywall++;
     if(a.summary) withSummary++;
-    if(a.origin === 'gdelt') realtime++; else fromRss++;
+    if(a.origin === 'pool') poolCount++;
+    else if(a.origin === 'gdelt') realtime++;
+    else fromRss++;
   }
   const days = Object.keys(byDay).sort();
   const topSources = Object.entries(bySrc).sort((a,b) => b[1]-a[1]).slice(0,10)
@@ -375,7 +449,8 @@ function buildStats(articles){
   const heat = total >= 50 ? '高' : total >= 20 ? '中' : total > 0 ? '低' : '无命中';
   return {
     total, media_count: Object.keys(bySrc).length, paywall_count: paywall,
-    summary_count: withSummary, realtime_count: realtime, rss_count: fromRss, heat_label: heat,
+    summary_count: withSummary, pool_count: poolCount,
+    realtime_count: realtime, rss_count: fromRss, heat_label: heat,
     by_day: days.map(day => ({day, count: byDay[day]})),
     top_sources: topSources
   };
@@ -385,9 +460,11 @@ async function doSearch(preset){
   const topic = (preset && preset.topic) || document.getElementById('topic').value.trim();
   if(!topic){ showError('请输入话题或主题'); return; }
   const sources = [];
+  const srcPoolEl = document.getElementById('srcPool');
+  if(srcPoolEl && srcPoolEl.checked) sources.push('pool');
   if(document.getElementById('srcRss').checked) sources.push('rss');
   if(document.getElementById('srcGdelt').checked) sources.push('gdelt');
-  if(!sources.length){ showError('请至少选择一个检索源'); return; }
+  if(!sources.length){ showError('请至少选择一个检索源；推荐勾选「全球新闻池」'); return; }
 
   const timespan = (preset && preset.timespan) || document.getElementById('timespan').value;
   const mode = document.getElementById('mode').value;
@@ -409,30 +486,51 @@ async function doSearch(preset){
     }
     document.getElementById('enkw').value = enkw;
 
-    setLoading(true, '正在抓取 RSS 精选源并实时检索全球媒体库…');
+    setLoading(true, '正在读取全球新闻池并检索所选数据源…');
     const tasks = [];
+    const srcErrors = [];
+    if(sources.includes('pool')){
+      tasks.push(fetchPool().catch(e => {
+        srcErrors.push('全球新闻池：' + e.message);
+        state.warnings.push('全球新闻池读取失败：' + e.message);
+        return [];
+      }));
+    }
     if(sources.includes('rss')){
       tasks.push(fetchRss().catch(e => {
+        srcErrors.push('RSS：' + e.message);
         state.warnings.push('RSS 精选源抓取失败：' + e.message);
         return [];
       }));
     }
     if(sources.includes('gdelt')){
       tasks.push(fetchGdelt(enkw || topic, timespan).catch(e => {
+        srcErrors.push('实时检索 GDELT：' + e.message);
         state.warnings.push('实时检索（GDELT）未返回数据：' + e.message +
-          '（已自动重试一次）；本次仅显示 RSS 精选源内容，可稍后点「开始检索」重试');
+          '（已自动重试一次）；可稍后点「开始检索」重试');
         return [];
       }));
     }
     const pool = (await Promise.all(tasks)).flat();
-    if(!pool.length) throw new Error('所有检索源均未取到数据，请检查网络或稍后重试');
+
+    // 不再自动回退 RSS：用户明确要求「不依赖 RSS 也能检索」，
+    // 拉取订阅快照会掩盖真实失败。改为如实报错并给出可操作的建议。
+    if(!pool.length){
+      throw new Error('本次未取到任何报道' +
+        (srcErrors.length ? '（' + srcErrors.join('；') + '）' : '') +
+        '。建议：勾选「全球新闻池」（境外服务器每 3 小时更新、页面同域读取，国内网络可用），或稍后重试实时检索。');
+    }
+    // 新闻池自身的告警（例如境外抓取被限流、暂时保留了上次数据）如实带入结果
+    if(sources.includes('pool') && poolMeta.warnings && poolMeta.warnings.length){
+      poolMeta.warnings.slice(0,3).forEach(w => state.warnings.push('新闻池：' + w));
+    }
 
     const terms = tokenize(enkw || topic);
     // 自动翻译失败时检索词仍是中文，英文报道会被全部过滤；此时改为只按时间范围列出
     const skipMatch = hasChinese(enkw || topic);
     if(skipMatch) state.warnings.push('检索词未能自动译成英文，已按时间范围列出全部报道（未做关键词过滤）；建议在「英文检索词」中手动填写以获得精确结果。');
     const cutoff = Date.now() - (TIMESPAN_DAYS[timespan] || 30) * 86400000;
-    const hits = [];
+    let hits = [];
     for(const a of pool){
       if(a.date){ const t = new Date(a.date).getTime(); if(!isNaN(t) && t < cutoff) continue; }
       if(skipMatch){ hits.push({ a, score: 1 }); continue; }
@@ -441,8 +539,24 @@ async function doSearch(preset){
       if(mode === 'all' && !hitAll) continue;
       hits.push({ a, score });
     }
+    // 关键词完全没命中时也要给出可用结果，并如实说明，避免「0 篇」让人以为工具坏了
+    if(!hits.length && pool.length){
+      state.warnings.push('检索词「' + (enkw || topic) + '」未在本次数据中命中；已放宽为按时间范围列出最多 60 篇。全球新闻池按预设的长期话题定期抓取，冷门或突发话题可能尚未入池，可换个检索词、缩短英文检索词，或加勾「实时检索 GDELT」。');
+      hits = pool.filter(a => !a.date || isNaN(new Date(a.date).getTime()) ||
+                              new Date(a.date).getTime() >= cutoff)
+                 .slice(0, 60).map(a => ({ a, score: 1 }));
+    }
     hits.sort((x,y) => (y.score - x.score) ||
       ((new Date(y.a.date||0).getTime()||0) - (new Date(x.a.date||0).getTime()||0)));
+
+    // 新闻池可达上千篇；为避免免费机翻接口被瞬间打满、页面长时间卡住，
+    // 按相关度取前 N 篇进入清单与提炼，并如实提示（不是静默丢弃）
+    const MAX_ARTICLES = 300;
+    if(hits.length > MAX_ARTICLES){
+      const dropped = hits.length - MAX_ARTICLES;
+      hits = hits.slice(0, MAX_ARTICLES);
+      state.warnings.push(`本次命中 ${hits.length + dropped} 篇，为控制免费翻译接口负载，清单与提炼按相关度取前 ${MAX_ARTICLES} 篇；可缩小英文检索词或改用「全部关键词命中」获得更精确结果。`);
+    }
 
     const seen = new Set(), articles = [];
     for(const {a, score} of hits){
@@ -486,19 +600,31 @@ function render(rec){
     <div class="stat"><div class="num">${s.paywall_count}</div><div class="lbl">需订阅报道</div></div>
     <div class="stat"><div class="num">${s.summary_count}</div><div class="lbl">含公开摘要</div></div>
     <div class="stat"><div class="num ${heatCls}">${s.heat_label}</div><div class="lbl">热度评估</div></div>`;
-  const snapNote = rssMeta.at
-    ? ` · 数据源：${rssMeta.source}（${new Date(rssMeta.at).toLocaleString('zh-CN')}${rssMeta.stale ? '，离线缓存' : ''}）`
-    : '';
+  const notes = [];
+  if(poolMeta.at){
+    notes.push(`全球新闻池生成于 ${poolMeta.generated || new Date(poolMeta.at).toLocaleString('zh-CN')}` +
+      `（${poolMeta.count} 篇 / ${poolMeta.sources} 家来源${poolMeta.stale ? '，暂用上一次数据' : ''}）`);
+  }
+  if(rssMeta.at){
+    notes.push(`RSS 数据源：${rssMeta.source}` +
+      `（${new Date(rssMeta.at).toLocaleString('zh-CN')}${rssMeta.stale ? '，离线缓存' : ''}）`);
+  }
+  const snapNote = notes.length ? ' · ' + notes.join(' · ') : '';
   document.getElementById('heatNote').textContent =
     (rec.request.auto_translated ? `中文话题已自动译为「${rec.request.en_keywords}」。` : '') +
-    `检索范围：${TIMESPAN_LABEL[rec.request.timespan]} · 检索源：${rec.request.sources.join(' + ')}` +
-    ` · 本次实时检索 ${s.realtime_count} 篇 / RSS 精选源 ${s.rss_count} 篇` +
+    `检索范围：${TIMESPAN_LABEL[rec.request.timespan]} · 检索源：` +
+    rec.request.sources.map(x => SRC_LABEL[x] || x).join(' + ') +
+    ` · 全球新闻池 ${s.pool_count} 篇 / 实时检索 ${s.realtime_count} 篇 / RSS 精选源 ${s.rss_count} 篇` +
     snapNote +
     (rec.warnings.length ? ' · ⚠ ' + rec.warnings.join('；') : '');
   const srcNote = document.getElementById('sourceNote');
-  if(srcNote) srcNote.textContent = s.realtime_count
-    ? `来源构成：RSS 精选源 ${s.rss_count} 篇（你的订阅快照，按话题本地筛选）　+　实时检索 ${s.realtime_count} 篇（GDELT 全球媒体库，本次实时抓取，清单中带「实时检索」标签）`
-    : `来源构成：仅 RSS 精选源 ${s.rss_count} 篇（你的订阅快照，按话题本地筛选）；本次实时检索未取到新报道，详见上方提示，可稍后点「开始检索」重试。`;
+  if(srcNote){
+    const parts = [];
+    if(s.pool_count) parts.push(`全球新闻池 ${s.pool_count} 篇（GitHub Actions 在境外服务器抓取，页面同域读取，独立于你的 RSS 站）`);
+    if(s.realtime_count) parts.push(`实时检索 ${s.realtime_count} 篇（本次浏览器直连 GDELT）`);
+    if(s.rss_count) parts.push(`RSS 精选源 ${s.rss_count} 篇（你的订阅快照）`);
+    srcNote.textContent = parts.length ? '来源构成：' + parts.join('　+　') : '来源构成：本次无命中报道。';
+  }
   drawDayChart(s.by_day);
   renderSrcBars(s.top_sources);
   document.getElementById('result').classList.remove('hidden');
@@ -517,7 +643,7 @@ function renderArticles(){
   const freshEl = document.getElementById('freshOnly');
   const freshOnly = freshEl ? freshEl.checked : false;
   const list = rec.articles.map((a,i) => ({a,i}))
-    .filter(({a}) => (!openOnly || !a.paywall) && (!freshOnly || a.origin === 'gdelt'));
+    .filter(({a}) => (!openOnly || !a.paywall) && (!freshOnly || a.origin !== 'rss'));
   document.getElementById('artCount').textContent = list.length;
   document.getElementById('articles').innerHTML = list.length ? list.map(({a,i}) => `
     <div class="art" id="art-${i}">
@@ -525,18 +651,19 @@ function renderArticles(){
         <h3><a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)}</a></h3>
       </div>
       <div class="meta">
-        <span class="tag ${a.origin}">${a.origin === 'rss' ? 'RSS 精选源' : '实时检索 GDELT'}</span>
+        <span class="tag ${a.origin}">${a.origin === 'rss' ? 'RSS 精选源' : a.origin === 'pool' ? '全球新闻池' : '实时检索 GDELT'}</span>
         <b>${esc(a.source)}</b> · ${fmtDate(a.date)}
         <span class="tag ${a.paywall ? 'pay':'open'}">${esc(a.access)}</span>
         ${a.country ? ' · ' + esc(a.country) : ''}
         ${a.author ? ' · 作者 ' + esc(a.author) : ''}
+        ${a.topic ? ' · 主题 ' + esc(a.topic) : ''}
       </div>
       ${a.summary ? `<div class="summ">${esc(a.summary.slice(0,460))}${a.summary.length>460?'…':''}</div>` : ''}
       <div class="card-actions">
         <a href="${esc(a.link)}" target="_blank" rel="noopener">原文</a>
         ${a.textise ? `<a href="${esc(a.textise)}" target="_blank" rel="noopener">Textise 文本视图</a>` : ''}
       </div>
-    </div>`).join('') : `<p style="color:var(--muted)">${freshOnly ? '本次实时检索未取到新报道，可取消「仅看实时检索」或稍后点「开始检索」重试。' : '当前筛选下没有报道，可取消「仅显示可公开访问」或扩大时间范围。'}</p>`;
+    </div>`).join('') : `<p style="color:var(--muted)">${freshOnly ? '本次没有来自「全球新闻池 / 实时检索」的报道，可取消「仅看非 RSS 新报道」或换一个检索词。' : '当前筛选下没有报道，可取消「仅显示可公开访问」或扩大时间范围。'}</p>`;
 }
 function drawDayChart(data){
   const svg = document.getElementById('dayChart');
@@ -885,7 +1012,7 @@ async function extractiveDigest(chosen, onProgress){
   let md = `## 一、提炼概览\n\n`;
   md += `| 项目 | 数值 |\n|---|---|\n`;
   md += `| 提炼报道 | ${chosen.length} 篇（全部命中） |\n| 涉及来源 | ${Object.keys(srcCount).length} 家 |\n`;
-  md += `| 来源构成 | 实时检索 ${chosen.filter(a=>a.origin==='gdelt').length} 篇 / RSS 精选源 ${chosen.filter(a=>a.origin==='rss').length} 篇 |\n`;
+  md += `| 来源构成 | 全球新闻池 ${chosen.filter(a=>a.origin==='pool').length} 篇 / 实时检索 ${chosen.filter(a=>a.origin==='gdelt').length} 篇 / RSS 精选源 ${chosen.filter(a=>a.origin==='rss').length} 篇 |\n`;
   md += `| 需订阅 / 仅标题 | ${chosen.filter(a=>a.paywall).length} / ${chosen.filter(a=>!a.summary).length} 篇 |\n`;
   md += `| 时间跨度 | ${span} |\n| 提炼引擎 | 内置规则式提炼（免配置） |\n\n`;
   md += `**主要来源**：` + Object.entries(srcCount).sort((a,b)=>b[1]-a[1]).slice(0,8)
@@ -893,7 +1020,7 @@ async function extractiveDigest(chosen, onProgress){
   if(kws.length) md += `**高频主题词**：` + kws.slice(0,10).map(([w,c]) => `\`${w}\`(${c})`).join('、') + `\n\n`;
 
   md += `## 二、逐篇中文摘译与要点（全部 ${chosen.length} 篇）\n\n`;
-  md += `> 说明：「中文要点 / 中文摘译」由免费机翻生成，措辞可能与原文有偏差；每篇均保留英文原文关键句以便核对。实时检索（GDELT）条目仅有标题与链接、无公开摘要，故只给出中文标题译名。\n\n`;
+  md += `> 说明：「中文要点 / 中文摘译」由免费机翻生成，措辞可能与原文有偏差；每篇均保留英文原文关键句以便核对。全球新闻池与实时检索（GDELT）条目仅提供标题与链接、无公开摘要，故只给出中文标题译名，不得据此推断正文内容。\n\n`;
   items.forEach((it, k) => {
     const a = it.a;
     md += `### ${k+1}. ${it.zhTitle || a.title}\n\n`;
@@ -906,7 +1033,8 @@ async function extractiveDigest(chosen, onProgress){
       md += `- **中文要点**：${firstSentence(it.zhExcerpt)}\n`;
       md += `- **中文摘译**：${ex}\n`;
     }else if(!it.keySents.length){
-      const srcNote = a.origin === 'gdelt' ? '，来自实时检索' : '';
+      const srcNote = a.origin === 'pool' ? '，来自全球新闻池'
+                    : a.origin === 'gdelt' ? '，来自实时检索' : '';
       md += `- **中文要点**：${it.zhTitle || a.title}（该条目无公开摘要，仅提供标题与链接${srcNote}，不得据此推断正文内容）\n`;
     }else{
       md += `- **中文要点**：（机翻未成功，请见下方英文原文关键句）\n`;
