@@ -1,15 +1,16 @@
 'use strict';
 
 /* ============================================================
- * Media Insight · 纯静态版核心逻辑
+ * Media Insight · 纯静态版核心逻辑（v2.5）
  * 数据源：全球新闻池（同域 news-data.json，GitHub Actions 境外抓取）
- *         / 用户自建 RSS 聚合站 / GDELT DOC API / Google gtx 翻译
+ *         / 用户自建 RSS 聚合站
+ * v2.4 移除「总结提炼」；v2.5 移除浏览器直连的「实时检索 GDELT」入口。
+ * 检索完成即呈现清单与概览；翻译接口仅保留一次「中文话题 → 英文检索词」。
  * 全部在浏览器内运行，无服务端
  * ============================================================ */
 
 const POOL_URL = 'news-data.json';   // 与页面同域，国内浏览器可直接读取
 const RSS_URL = 'https://patfang0105.github.io/my-rss-blog/rss-data.json';
-const GDELT_API = 'https://api.gdeltproject.org/api/v2/doc/doc';
 const MYMEMORY = 'https://api.mymemory.translated.net/get';
 
 const PAYWALL_DOMAINS = [
@@ -26,10 +27,9 @@ const PAYWALL_NAMES = [
   'rssopinion','cnbc','nytimes','the guardian'
 ];
 
-const TIMESPAN_GDELT = { '24h':'24h', '7d':'1w', '30d':'1m', '180d':'3m' };
 const TIMESPAN_DAYS  = { '24h':1, '7d':7, '30d':30, '180d':180 };
 const TIMESPAN_LABEL = { '24h':'最近24小时','7d':'最近7天','30d':'最近30天','180d':'最近180天' };
-const SRC_LABEL = { pool:'全球新闻池', rss:'RSS 精选源', gdelt:'实时检索 GDELT' };
+const SRC_LABEL = { pool:'全球新闻池', rss:'RSS 精选源' };
 
 const STOPWORDS = new Set(('the a an and or but if of to in on at by for from with as is are was were be been being '
   + 'it its this that these those there here their they them he she his her we our you your i me my '
@@ -38,27 +38,17 @@ const STOPWORDS = new Set(('the a an and or but if of to in on at by for from wi
   + 'once more most other some such only own same s t just don now said says say new one two also which who '
   + 'what when where why how all any both each few more other some such').split(/\s+/));
 
-const ATTITUDE_WORDS = {
-  '警示/担忧': ['warn','warning','warned','risk','risks','threat','concern','concerns','fear','pressure','vulnerab','fragil'],
-  '呼吁/建议': ['urge','urged','call for','calls for','called for','should','must','need to','recommend','push for'],
-  '批评/质疑': ['critic','criticise','criticize','question','doubt','challenge','accuse','blame','flaw','failure'],
-  '肯定/看好': ['welcome','praise','boost','strong','resilien','opportunity','optimis','growth','gain','benefit'],
-  '分歧/博弈': ['dispute','tension','clash','divide','split','rival','compete','bargain','leverage','standoff']
-};
+/* v2.4：态度词、关键句抽取、批量机翻等提炼专用逻辑已移除 */
 
 const state = {
   record: null,
-  digest: null,
-  warnings: [],
-  digesting: false,     // 提炼任务进行中，防止并发
-  digestSeq: 0,         // 任务序号，新检索会让旧任务的结果作废
-  pendingAuto: false    // 有新检索在等待自动提炼
+  warnings: []
 };
 
 /* ---------------- 全球新闻池：页面同域只读 ----------------
  * 抓取由 GitHub Actions 在境外服务器每 3 小时完成，结果写入仓库的
  * news-data.json。浏览器只读本站点自己的文件，因此不跨境、无 CORS、
- * 不受 GDELT 5 秒限流影响，也完全不触碰 my-rss-blog。
+ * 不受境外接口限流影响，也完全不触碰 my-rss-blog。
  * --------------------------------------------------------- */
 const POOL_SNAPSHOT_KEY = 'mi_pool_snapshot_v1';
 let poolCache = null;
@@ -156,7 +146,7 @@ function isoDay(iso){
 }
 function parseDate(s){
   if(!s) return '';
-  if(/^\d{8}T\d{6}Z$/.test(s)){          // GDELT seendate: 20261119T120000Z
+  if(/^\d{8}T\d{6}Z$/.test(s)){          // 境外媒体库 seendate 格式：20261119T120000Z
     return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)+'T'+
            s.slice(9,11)+':'+s.slice(11,13)+':'+s.slice(13,15)+'Z';
   }
@@ -192,9 +182,10 @@ function tokenize(q){
     .filter(x => x.length > 1 && !STOPWORDS.has(x));
 }
 
-/* ---------------- 翻译（Google gtx 优先 / MyMemory 兜底，双方向） ----------------
- * 全量提炼需要翻译几十到几百篇，gtx 支持较长文本且可并发，
- * 单条失败时自动降级到 MyMemory，两者都失败才保留英文原文。
+/* ---------------- 翻译（Google gtx / MyMemory 双接口竞速） ----------------
+ * v2.4 起只用于把中文话题译成英文检索词（每次检索最多 1 轮请求），
+ * 不再对报道逐篇机翻。两个免费接口并发竞速，谁先成功用谁；
+ * 某个接口超时/不可达时不再串行重试，避免把整轮检索拖慢几十秒。
  * ------------------------------------------------------------------ */
 
 /* 翻译结果本机持久化：重复检索同一话题时直接复用，显著减少免费接口请求与限流 */
@@ -223,7 +214,7 @@ async function gtx(text, from, to){
     + '&sl=' + encodeURIComponent(from) + '&tl=' + encodeURIComponent(to)
     + '&dt=t&q=' + encodeURIComponent(text);
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 15000);
+  const timer = setTimeout(() => ctl.abort(), 5000);
   try{
     const r = await fetch(url, { signal: ctl.signal });
     if(!r.ok) throw new Error('gtx HTTP ' + r.status);
@@ -235,7 +226,7 @@ async function gtx(text, from, to){
 }
 async function mymemory(text, from, to){
   const url = MYMEMORY + '?' + new URLSearchParams({ q: text.slice(0,450), langpair: from + '|' + to });
-  const r = await fetchWithTimeout(url, {}, 9000);
+  const r = await fetchWithTimeout(url, {}, 7000);
   if(!r.ok) throw new Error('翻译接口 HTTP ' + r.status);
   const d = await r.json();
   let out = (d.responseData && d.responseData.translatedText) || '';
@@ -243,18 +234,21 @@ async function mymemory(text, from, to){
   if(!out || /MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID/i.test(out)) throw new Error('翻译接口未返回有效结果');
   return out;
 }
+/* 并发竞速：任一接口成功即返回，全部失败才抛错（不依赖 Promise.any，兼容旧浏览器） */
+function firstFulfilled(promises){
+  return new Promise((resolve, reject) => {
+    let pending = promises.length;
+    const errs = [];
+    promises.forEach(p => p.then(resolve, e => {
+      errs.push((e && e.message) ? e.message : String(e));
+      if(--pending === 0) reject(new Error(errs.join('；') || '翻译接口均不可用'));
+    }));
+  });
+}
 async function translateText(text, from, to){
   const key = from + '|' + to + '|' + text;
   if(transCache.has(key)) return transCache.get(key);
-  let out = null, lastErr = null;
-  for(let attempt = 0; attempt < 2; attempt++){
-    try{ out = await gtx(text, from, to); break; }
-    catch(e){ lastErr = e; if(attempt === 0) await new Promise(r => setTimeout(r, 800)); }
-  }
-  if(out === null){
-    try{ out = await mymemory(text, from, to); }
-    catch(e){ throw lastErr || e; }
-  }
+  const out = await firstFulfilled([ gtx(text, from, to), mymemory(text, from, to) ]);
   transCache.set(key, out);
   scheduleTransSave();
   return out;
@@ -355,56 +349,8 @@ async function refreshDataSource(){
   note.textContent = parts.join(' · ');
   btn.disabled = false;
 }
-let lastGdeltAt = 0;
-async function gdeltThrottle(){
-  // GDELT 官方要求两次请求间隔 ≥5 秒；页面内做节流，避免连续检索被限流
-  const wait = 6500 - (Date.now() - lastGdeltAt);
-  if(wait > 0) await new Promise(r => setTimeout(r, wait));
-  lastGdeltAt = Date.now();
-}
-async function fetchGdelt(q, timespan){
-  // 旧版把整个检索词加引号做精确短语匹配，召回极低；改为多词 OR 召回，再由本地相关度打分过滤
-  const words = (q || '').replace(/["'()]/g, ' ').split(/\s+/)
-    .filter(w => w.length > 2 && !STOPWORDS.has(w.toLowerCase())).slice(0, 5);
-  const core = words.length > 1 ? '(' + words.join(' OR ') + ')' : (words[0] || q);
-  const query = core + ' sourcelang:english';
-  const params = new URLSearchParams({
-    query, mode:'artlist', maxrecords:'250', format:'json',
-    sort:'datedesc', timespan: TIMESPAN_GDELT[timespan] || '1m'
-  });
-  const url = GDELT_API + '?' + params;
-  let lastErr;
-  for(let attempt = 0; attempt < 2; attempt++){
-    await gdeltThrottle();
-    try{
-      const r = await fetchWithTimeout(url, {}, 12000);
-      if(r.status === 429) throw new Error('GDELT 接口限流（429）');
-      if(!r.ok) throw new Error('GDELT HTTP ' + r.status);
-      const txt = await r.text();
-      if(txt.trim().startsWith('Please limit')) throw new Error('GDELT 接口限流');
-      const d = JSON.parse(txt);
-      return (d.articles || []).map(it => ({
-        origin: 'gdelt',
-        title: stripHtml(it.title),
-        link: it.url || '',
-        source: it.domain || '未知来源',
-        author: '',
-        date: parseDate(it.seendate),
-        summary: '',
-        country: it.sourcecountry || ''
-      }));
-    }catch(e){
-      // 429 响应不带 CORS 头，浏览器会报成 "Failed to fetch"，这里翻译成可理解的提示
-      const raw = (e && e.message) || String(e);
-      const msg = /Failed to fetch|NetworkError|Load failed|TypeError/i.test(raw)
-        ? '网络不可达或 GDELT 限流（浏览器端限流常表现为网络错误）'
-        : raw;
-      lastErr = new Error(msg);
-      if(attempt === 0) await new Promise(r => setTimeout(r, 5500));  // 限流后等待再试一次
-    }
-  }
-  throw lastErr || new Error('GDELT 未返回数据');
-}
+/* v2.5：浏览器直连 GDELT 的「实时检索」入口已按需求移除。
+ * 新闻池仍由 GitHub Actions 在境外服务器抓取（scripts/fetch_news.py），不受影响。 */
 
 /* ---------------- 检索、打分、统计 ---------------- */
 
@@ -428,7 +374,7 @@ function scoreArticle(a, terms){
 }
 function buildStats(articles){
   const byDay = {}, bySrc = {};
-  let paywall = 0, withSummary = 0, poolCount = 0, realtime = 0, fromRss = 0;
+  let paywall = 0, withSummary = 0, poolCount = 0, fromRss = 0;
   for(const a of articles){
     if(a.date){
       const d = isoDay(a.date);
@@ -439,7 +385,6 @@ function buildStats(articles){
     if(a.paywall) paywall++;
     if(a.summary) withSummary++;
     if(a.origin === 'pool') poolCount++;
-    else if(a.origin === 'gdelt') realtime++;
     else fromRss++;
   }
   const days = Object.keys(byDay).sort();
@@ -450,7 +395,7 @@ function buildStats(articles){
   return {
     total, media_count: Object.keys(bySrc).length, paywall_count: paywall,
     summary_count: withSummary, pool_count: poolCount,
-    realtime_count: realtime, rss_count: fromRss, heat_label: heat,
+    rss_count: fromRss, heat_label: heat,
     by_day: days.map(day => ({day, count: byDay[day]})),
     top_sources: topSources
   };
@@ -463,7 +408,6 @@ async function doSearch(preset){
   const srcPoolEl = document.getElementById('srcPool');
   if(srcPoolEl && srcPoolEl.checked) sources.push('pool');
   if(document.getElementById('srcRss').checked) sources.push('rss');
-  if(document.getElementById('srcGdelt').checked) sources.push('gdelt');
   if(!sources.length){ showError('请至少选择一个检索源；推荐勾选「全球新闻池」'); return; }
 
   const timespan = (preset && preset.timespan) || document.getElementById('timespan').value;
@@ -472,11 +416,9 @@ async function doSearch(preset){
 
   const btn = document.getElementById('goBtn');
   btn.disabled = true;
-  state.digestSeq++;                 // 让上一次检索的后台提炼结果作废
   setLoading(true, '正在翻译话题并检索境外媒体数据库…');
   document.getElementById('result').classList.add('hidden');
   state.warnings = [];
-  state.digest = null;
 
   try{
     let autoTranslated = false;
@@ -503,14 +445,6 @@ async function doSearch(preset){
         return [];
       }));
     }
-    if(sources.includes('gdelt')){
-      tasks.push(fetchGdelt(enkw || topic, timespan).catch(e => {
-        srcErrors.push('实时检索 GDELT：' + e.message);
-        state.warnings.push('实时检索（GDELT）未返回数据：' + e.message +
-          '（已自动重试一次）；可稍后点「开始检索」重试');
-        return [];
-      }));
-    }
     const pool = (await Promise.all(tasks)).flat();
 
     // 不再自动回退 RSS：用户明确要求「不依赖 RSS 也能检索」，
@@ -518,7 +452,7 @@ async function doSearch(preset){
     if(!pool.length){
       throw new Error('本次未取到任何报道' +
         (srcErrors.length ? '（' + srcErrors.join('；') + '）' : '') +
-        '。建议：勾选「全球新闻池」（境外服务器每 3 小时更新、页面同域读取，国内网络可用），或稍后重试实时检索。');
+        '。建议：勾选「全球新闻池」（境外服务器每 3 小时更新、页面同域读取，国内网络可用），或稍后重试。');
     }
     // 新闻池自身的告警（例如境外抓取被限流、暂时保留了上次数据）如实带入结果
     if(sources.includes('pool') && poolMeta.warnings && poolMeta.warnings.length){
@@ -541,7 +475,7 @@ async function doSearch(preset){
     }
     // 关键词完全没命中时也要给出可用结果，并如实说明，避免「0 篇」让人以为工具坏了
     if(!hits.length && pool.length){
-      state.warnings.push('检索词「' + (enkw || topic) + '」未在本次数据中命中；已放宽为按时间范围列出最多 60 篇。全球新闻池按预设的长期话题定期抓取，冷门或突发话题可能尚未入池，可换个检索词、缩短英文检索词，或加勾「实时检索 GDELT」。');
+      state.warnings.push('检索词「' + (enkw || topic) + '」未在本次数据中命中；已放宽为按时间范围列出最多 60 篇。全球新闻池按预设的长期话题定期抓取，冷门或突发话题可能尚未入池，可换个检索词、缩短英文检索词，或稍后再试（新闻池每 3 小时更新）。');
       hits = pool.filter(a => !a.date || isNaN(new Date(a.date).getTime()) ||
                               new Date(a.date).getTime() >= cutoff)
                  .slice(0, 60).map(a => ({ a, score: 1 }));
@@ -549,13 +483,13 @@ async function doSearch(preset){
     hits.sort((x,y) => (y.score - x.score) ||
       ((new Date(y.a.date||0).getTime()||0) - (new Date(x.a.date||0).getTime()||0)));
 
-    // 新闻池可达上千篇；为避免免费机翻接口被瞬间打满、页面长时间卡住，
-    // 按相关度取前 N 篇进入清单与提炼，并如实提示（不是静默丢弃）
+    // 新闻池可达上千篇；为避免一次渲染过多卡片拖慢页面，
+    // 按相关度取前 N 篇进入清单，并如实提示（不是静默丢弃）
     const MAX_ARTICLES = 300;
     if(hits.length > MAX_ARTICLES){
       const dropped = hits.length - MAX_ARTICLES;
       hits = hits.slice(0, MAX_ARTICLES);
-      state.warnings.push(`本次命中 ${hits.length + dropped} 篇，为控制免费翻译接口负载，清单与提炼按相关度取前 ${MAX_ARTICLES} 篇；可缩小英文检索词或改用「全部关键词命中」获得更精确结果。`);
+      state.warnings.push(`本次命中 ${hits.length + dropped} 篇，清单按相关度展示前 ${MAX_ARTICLES} 篇；可缩小英文检索词或改用「全部关键词命中」获得更精确结果。`);
     }
 
     const seen = new Set(), articles = [];
@@ -577,10 +511,6 @@ async function doSearch(preset){
     };
     render(state.record);
     saveHistory(state.record);
-    // 自动提炼：检索完成即后台生成，覆盖全部命中报道，无需任何选择
-    if(loadAutoCfg().enabled && articles.length){
-      autoDigest().catch(e => console.warn('自动提炼失败：', e));
-    }
   }catch(err){
     showError('检索失败：' + err.message);
   }finally{
@@ -614,25 +544,19 @@ function render(rec){
     (rec.request.auto_translated ? `中文话题已自动译为「${rec.request.en_keywords}」。` : '') +
     `检索范围：${TIMESPAN_LABEL[rec.request.timespan]} · 检索源：` +
     rec.request.sources.map(x => SRC_LABEL[x] || x).join(' + ') +
-    ` · 全球新闻池 ${s.pool_count} 篇 / 实时检索 ${s.realtime_count} 篇 / RSS 精选源 ${s.rss_count} 篇` +
+    ` · 全球新闻池 ${s.pool_count} 篇 / RSS 精选源 ${s.rss_count} 篇` +
     snapNote +
     (rec.warnings.length ? ' · ⚠ ' + rec.warnings.join('；') : '');
   const srcNote = document.getElementById('sourceNote');
   if(srcNote){
     const parts = [];
     if(s.pool_count) parts.push(`全球新闻池 ${s.pool_count} 篇（GitHub Actions 在境外服务器抓取，页面同域读取，独立于你的 RSS 站）`);
-    if(s.realtime_count) parts.push(`实时检索 ${s.realtime_count} 篇（本次浏览器直连 GDELT）`);
     if(s.rss_count) parts.push(`RSS 精选源 ${s.rss_count} 篇（你的订阅快照）`);
     srcNote.textContent = parts.length ? '来源构成：' + parts.join('　+　') : '来源构成：本次无命中报道。';
   }
   drawDayChart(s.by_day);
   renderSrcBars(s.top_sources);
   document.getElementById('result').classList.remove('hidden');
-  document.getElementById('digestResult').classList.add('hidden');
-  document.getElementById('digestHint').textContent = loadAutoCfg().enabled
-    ? `正在为全部 ${rec.articles.length} 篇命中报道生成中文摘译与要点…（结果直接在本区查看）`
-    : '自动提炼已关闭；可在上方开启，或点「↻ 重新生成全部」手动生成。';
-  document.getElementById('aiPrompt').value = buildAIPrompt(rec);
   renderArticles();
   loadHistory();
 }
@@ -651,7 +575,7 @@ function renderArticles(){
         <h3><a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)}</a></h3>
       </div>
       <div class="meta">
-        <span class="tag ${a.origin}">${a.origin === 'rss' ? 'RSS 精选源' : a.origin === 'pool' ? '全球新闻池' : '实时检索 GDELT'}</span>
+        <span class="tag ${a.origin}">${a.origin === 'rss' ? 'RSS 精选源' : '全球新闻池'}</span>
         <b>${esc(a.source)}</b> · ${fmtDate(a.date)}
         <span class="tag ${a.paywall ? 'pay':'open'}">${esc(a.access)}</span>
         ${a.country ? ' · ' + esc(a.country) : ''}
@@ -663,7 +587,7 @@ function renderArticles(){
         <a href="${esc(a.link)}" target="_blank" rel="noopener">原文</a>
         ${a.textise ? `<a href="${esc(a.textise)}" target="_blank" rel="noopener">Textise 文本视图</a>` : ''}
       </div>
-    </div>`).join('') : `<p style="color:var(--muted)">${freshOnly ? '本次没有来自「全球新闻池 / 实时检索」的报道，可取消「仅看非 RSS 新报道」或换一个检索词。' : '当前筛选下没有报道，可取消「仅显示可公开访问」或扩大时间范围。'}</p>`;
+    </div>`).join('') : `<p style="color:var(--muted)">${freshOnly ? '本次没有来自「全球新闻池」的报道，可取消「仅看非 RSS 新报道」或换一个检索词。' : '当前筛选下没有报道，可取消「仅显示可公开访问」或扩大时间范围。'}</p>`;
 }
 function drawDayChart(data){
   const svg = document.getElementById('dayChart');
@@ -719,477 +643,9 @@ function rerun(topic, timespan){
   doSearch({topic, timespan});
 }
 
-/* ---------------- LLM 设置（可选） ---------------- */
-
-const LLM_KEY = 'mi_llm_v1';
-function loadLLM(){
-  try{ return JSON.parse(localStorage.getItem(LLM_KEY) || '{}'); }catch(e){ return {}; }
-}
-function fillLLM(){
-  const c = loadLLM();
-  document.getElementById('llmBase').value  = c.base || '';
-  document.getElementById('llmKey').value   = c.key || '';
-  document.getElementById('llmModel').value = c.model || '';
-  document.getElementById('llmState').textContent = c.key ? '已在本机保存配置，提炼时将自动调用 LLM' : '未配置，使用内置免配置提炼';
-}
-function saveLLM(){
-  const c = {
-    base: document.getElementById('llmBase').value.trim(),
-    key: document.getElementById('llmKey').value.trim(),
-    model: document.getElementById('llmModel').value.trim() || 'gpt-4o-mini'
-  };
-  try{ localStorage.setItem(LLM_KEY, JSON.stringify(c)); }catch(e){}
-  fillLLM();
-  showError(''); hideError();
-}
-function clearLLM(){
-  try{ localStorage.removeItem(LLM_KEY); }catch(e){}
-  document.getElementById('llmBase').value = '';
-  document.getElementById('llmKey').value = '';
-  document.getElementById('llmModel').value = '';
-  fillLLM();
-}
-function toggleLLM(){
-  document.getElementById('llmBox').classList.toggle('hidden');
-  fillLLM();
-}
-
-/* ---------------- 自动提炼设置（保存在本机浏览器） ---------------- */
-
-const AUTO_KEY = 'mi_auto_digest_v1';
-function loadAutoCfg(){
-  try{
-    const c = JSON.parse(localStorage.getItem(AUTO_KEY) || 'null');
-    if(c && typeof c === 'object') return { enabled: c.enabled !== false };
-  }catch(e){}
-  return { enabled: true };
-}
-function saveAutoCfg(c){
-  try{ localStorage.setItem(AUTO_KEY, JSON.stringify(c)); }catch(e){}
-}
-function onAutoCfgChange(){
-  const enabled = document.getElementById('autoDigest').checked;
-  saveAutoCfg({ enabled });
-  const note = document.getElementById('autoCfgNote');
-  if(note) note.textContent = enabled
-    ? '已开启：每次检索完成后，自动为全部命中报道生成中文摘译与要点，无需任何选择操作。'
-    : '已关闭：本次检索不会自动生成，可点「↻ 重新生成全部」手动生成。';
-}
-function fillAutoCfg(){
-  document.getElementById('autoDigest').checked = loadAutoCfg().enabled;
-  onAutoCfgChange();
-}
-
-/* ---------------- 总结提炼：入口（全量自动，无需选择） ---------------- */
-
-/* 检索完成后由系统调用：覆盖全部命中报道 */
-async function autoDigest(force){
-  const rec = state.record;
-  if(!rec || !rec.articles.length) return;
-  if(!force && !loadAutoCfg().enabled) return;
-  if(state.digesting){ state.pendingAuto = true; return; }
-  await runDigest(rec.articles.slice(), '自动');
-}
-
-/* 兼容入口：重新生成全部 */
-async function doDigest(){ await autoDigest(true); }
-
-async function runDigest(chosen, mode){
-  if(state.digesting) return;
-  state.digesting = true;
-  const seq = ++state.digestSeq;
-  hideError();
-  const regen = document.getElementById('regenBtn');
-  if(regen) regen.disabled = true;
-  const hint = document.getElementById('digestHint');
-  hint.textContent = `正在为全部 ${chosen.length} 篇命中报道生成中文摘译与要点…（篇数较多时约需 1 分钟）`;
-
-  // 内置提炼逐条机翻时回报进度
-  const onProgress = (done, total, phase, retryCount) => {
-    hint.textContent = phase === 'retry'
-      ? `正在补译 ${retryCount} 条被限流的译文…（共 ${chosen.length} 篇）`
-      : `正在生成中文摘译与要点… 机翻进度 ${done}/${total}（共 ${chosen.length} 篇）`;
-  };
-
-  let md = '', engine = '', degraded = '';
-  try{
-    const cfg = loadLLM();
-    if(cfg.key){
-      try{
-        md = await llmDigest(chosen, cfg);
-        engine = 'LLM 智能摘译（' + (cfg.model || 'gpt-4o-mini') + '）';
-      }catch(e){
-        degraded = 'LLM 调用失败，已自动降级为内置提炼：' + e.message;
-        md = await extractiveDigest(chosen, onProgress);
-        engine = '内置提炼（免配置）';
-      }
-    }else{
-      md = await extractiveDigest(chosen, onProgress);
-      engine = '内置提炼（免配置）';
-    }
-  }catch(e){
-    state.digesting = false;
-    if(regen) regen.disabled = false;
-    hint.textContent = '提炼失败：' + e.message;
-    showError('总结提炼失败：' + e.message);
-    return;
-  }
-
-  const rec = state.record;
-  const head = `# 「${rec.request.topic}」境外媒体总结提炼报告\n\n`
-    + `> **生成时间**：${new Date().toLocaleString('zh-CN')}　|　**提炼引擎**：${engine}\n`
-    + `> **生成方式**：检索后自动生成，覆盖全部命中报道（无需选择）　|　`
-    + `**提炼报道**：${chosen.length} 篇 / ${new Set(chosen.map(a => a.source)).size} 家来源\n`
-    + `> **检索词**：${rec.request.en_keywords}　|　**时间范围**：${TIMESPAN_LABEL[rec.request.timespan]}　|　`
-    + `**命中总量**：${rec.stats.total} 篇\n`
-    + (degraded ? `> ⚠ ${degraded}\n` : '')
-    + `> 本报告仅基于各媒体**公开提供的标题与摘要**生成，不含付费墙全文；请遵守原文版权。\n\n---\n\n`;
-  md = head + md;
-
-  const foot = `\n\n---\n\n## 信息局限与合规说明\n\n`
-    + `- 本报告覆盖本次检索命中的**全部 ${chosen.length} 篇报道**，逐篇给出中文摘译与要点；但基于公开摘要，不是全文翻译。\n`
-    + `- 全部报道中，**${chosen.filter(a=>a.paywall).length} 篇需订阅**、**${chosen.filter(a=>!a.summary).length} 篇无公开摘要**，相关条目不得据此推断全文细节。\n`
-    + `- 内置提炼采用规则式关键句抽取与免费机翻，措辞可能与原文存在偏差；每篇均保留英文原文关键句以便核对。\n`
-    + `- 材料仅供内部研判使用，转载与引用请遵循原文版权与订阅条款。\n`;
-  md += foot;
-
-  state.digesting = false;
-  if(regen) regen.disabled = false;
-  if(seq !== state.digestSeq){
-    // 已有更新的检索：丢弃过期结果，并为新结果补跑一次自动提炼
-    if(state.pendingAuto){ state.pendingAuto = false; setTimeout(() => autoDigest().catch(()=>{}), 30); }
-    return;
-  }
-
-  state.digest = { md, engine, chosen, degraded, mode };
-  document.getElementById('digestResult').innerHTML = mdToHtml(md);
-  document.getElementById('digestResult').classList.remove('hidden');
-  hint.textContent =
-    `已自动生成（${engine}，覆盖全部 ${chosen.length} 篇）${degraded ? ' · ' + degraded : ''}。报告已在本区完整呈现，可直接在页面查看。`;
-  if(state.pendingAuto){ state.pendingAuto = false; setTimeout(() => autoDigest().catch(()=>{}), 30); }
-}
-
-/* ---------------- 总结提炼：内置免配置算法 ---------------- */
-
-function splitSentences(text){
-  return (text || '').replace(/\s+/g,' ')
-    .split(/(?<=[.!?])\s+(?=[A-Z"“])/)
-    .map(s => s.trim())
-    .filter(s => s.length > 25 && s.length < 500);
-}
-function scoreSentence(s, terms){
-  let sc = 0;
-  const low = s.toLowerCase();
-  if(/\d/.test(s)) sc += 2;
-  if(/["“”']/.test(s)) sc += 1;
-  if(/\b(percent|%|billion|million|trillion|yuan|dollar|yuan|tonne|gw|tariff|rate)\b/i.test(s)) sc += 2;
-  terms.forEach(t => { if(low.includes(t)) sc += 2; });
-  if(s.length >= 60 && s.length <= 240) sc += 1;
-  if(/\b(said|says|warned|urged|argued|according to|told)\b/i.test(s)) sc += 1;
-  return sc;
-}
-function topKeywords(texts, terms){
-  const freq = {};
-  texts.forEach(t => (t || '').toLowerCase().replace(/[^a-z0-9\s-]/g,' ').split(/\s+/).forEach(w => {
-    if(w.length > 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w) && !terms.includes(w))
-      freq[w] = (freq[w] || 0) + 1;
-  }));
-  return Object.entries(freq).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0])).slice(0,14);
-}
-async function translateBatch(texts, onProgress){
-  // 并发池：覆盖全部文章；单条失败自动降级为英文，不阻断其余条目
-  const out = new Array(texts.length);
-  let cursor = 0, done = 0;
-  const CONCURRENCY = 5;
-  async function worker(){
-    for(;;){
-      const i = cursor++;
-      if(i >= texts.length) return;
-      const t = texts[i];
-      if(!t || !t.trim()){ out[i] = {zh:'', ok:false}; }
-      else{
-        try{ out[i] = {zh: await translateText(t, 'en', 'zh-CN'), ok:true}; }
-        catch(e){ out[i] = {zh:'', ok:false}; }
-      }
-      done++;
-      if(onProgress) onProgress(done, texts.length);
-    }
-  }
-  const n = Math.min(CONCURRENCY, texts.length);
-  await Promise.all(Array.from({length: n}, worker));
-
-  // 并发阶段被限流的条目：低并发错峰补译一次；设条数上限与总时限，避免接口整体限流时页面久等
-  const failed = [];
-  for(let i = 0; i < texts.length; i++){
-    if(!(out[i] && out[i].ok) && texts[i] && texts[i].trim()) failed.push(i);
-  }
-  const retryList = failed.slice(0, 24);
-  if(retryList.length && onProgress) onProgress(texts.length, texts.length, 'retry', retryList.length);
-  const deadline = Date.now() + 30000;
-  let rc = 0;
-  async function retryWorker(){
-    for(;;){
-      if(Date.now() > deadline) return;
-      const k = rc++;
-      if(k >= retryList.length) return;
-      const i = retryList[k];
-      transCache.delete('en|zh-CN|' + texts[i]);
-      try{ out[i] = {zh: await translateText(texts[i], 'en', 'zh-CN'), ok:true}; }
-      catch(e){ /* 保持降级，保留英文原文 */ }
-      await new Promise(r => setTimeout(r, 200));
-    }
-  }
-  await Promise.all(Array.from({length: Math.min(3, retryList.length)}, retryWorker));
-  return out;
-}
-function firstSentence(s){
-  if(!s) return '';
-  const m = s.match(/^[^。！？!?；;]+[。！？!?；;]?/);
-  let t = (m ? m[0] : s).trim();
-  if(t.length > 150) t = t.slice(0,150) + '…';
-  return t;
-}
-async function extractiveDigest(chosen, onProgress){
-  const rec = state.record;
-  const terms = tokenize(rec.request.en_keywords || rec.request.topic);
-
-  // 1) 逐篇抽取关键句：覆盖全部命中报道，不设上限
-  const items = chosen.map((a, idx) => {
-    const sents = splitSentences(a.summary);
-    const ranked = sents.map((s,j) => ({s, sc: scoreSentence(s, terms), j}))
-      .sort((x,y) => y.sc - x.sc || x.j - y.j);
-    const keySents = ranked.slice(0,2).map(x => x.s);
-    const tags = [];
-    if(/\d/.test(a.summary || '')) tags.push('含关键数据');
-    if(/["“”]/.test(a.summary || '')) tags.push('含直接引语');
-    if(a.paywall) tags.push('基于公开摘要');
-    if(!a.summary) tags.push('仅标题可用');
-    return { a, idx, keySents, tags };
-  });
-
-  // 2) 机翻：每篇「标题 + 关键句段落」两条，覆盖全部文章
-  const toTrans = [];
-  items.forEach(it => {
-    toTrans.push((it.a.title || '').slice(0,200));
-    toTrans.push(it.keySents.join(' ').slice(0,900));
-  });
-  let zh = [];
-  try{ zh = await translateBatch(toTrans, onProgress); }
-  catch(e){ zh = toTrans.map(() => ({zh:'', ok:false})); }
-  let transFail = 0;
-  items.forEach((it, k) => {
-    it.zhTitle   = (zh[k*2] && zh[k*2].ok) ? zh[k*2].zh : '';
-    it.zhExcerpt = (zh[k*2+1] && zh[k*2+1].ok) ? zh[k*2+1].zh : '';
-    if(it.keySents.length && !it.zhExcerpt) transFail++;   // 无摘要条目不计失败
-  });
-
-  // 3) 汇总分析
-  const srcCount = {};
-  chosen.forEach(a => { srcCount[a.source] = (srcCount[a.source]||0) + 1; });
-  const dates = chosen.map(a => a.date).filter(Boolean).sort();
-  const span = dates.length ? `${isoDay(dates[0])} ~ ${isoDay(dates[dates.length-1])}` : '日期信息不足';
-  const kws = topKeywords(chosen.map(a => (a.title||'') + ' ' + (a.summary||'')), terms);
-  const shared = kws.filter(([w,c]) => c >= Math.max(3, Math.ceil(chosen.length/3))).slice(0,8);
-
-  const attitude = {};
-  chosen.forEach(a => {
-    const text = ((a.title||'') + ' ' + (a.summary||'')).toLowerCase();
-    Object.entries(ATTITUDE_WORDS).forEach(([label, words]) => {
-      if(words.some(w => text.includes(w))){
-        if(!attitude[label]) attitude[label] = new Set();
-        attitude[label].add(a.source);
-      }
-    });
-  });
-
-  const numbers = [];
-  chosen.forEach(a => {
-    const m = (a.summary || '').match(/[^.!?]*\b\d[\d,.]*\s*(%|percent|billion|million|trillion|yuan|dollars?|tonnes?|gw|basis points)\b[^.!?]*/gi);
-    if(m) m.slice(0,1).forEach(x => numbers.push({src:a.source, text:x.trim().slice(0,220)}));
-  });
-
-  // 4) 输出 Markdown
-  let md = `## 一、提炼概览\n\n`;
-  md += `| 项目 | 数值 |\n|---|---|\n`;
-  md += `| 提炼报道 | ${chosen.length} 篇（全部命中） |\n| 涉及来源 | ${Object.keys(srcCount).length} 家 |\n`;
-  md += `| 来源构成 | 全球新闻池 ${chosen.filter(a=>a.origin==='pool').length} 篇 / 实时检索 ${chosen.filter(a=>a.origin==='gdelt').length} 篇 / RSS 精选源 ${chosen.filter(a=>a.origin==='rss').length} 篇 |\n`;
-  md += `| 需订阅 / 仅标题 | ${chosen.filter(a=>a.paywall).length} / ${chosen.filter(a=>!a.summary).length} 篇 |\n`;
-  md += `| 时间跨度 | ${span} |\n| 提炼引擎 | 内置规则式提炼（免配置） |\n\n`;
-  md += `**主要来源**：` + Object.entries(srcCount).sort((a,b)=>b[1]-a[1]).slice(0,8)
-          .map(([s,c]) => `${s}（${c}）`).join('、') + `\n\n`;
-  if(kws.length) md += `**高频主题词**：` + kws.slice(0,10).map(([w,c]) => `\`${w}\`(${c})`).join('、') + `\n\n`;
-
-  md += `## 二、逐篇中文摘译与要点（全部 ${chosen.length} 篇）\n\n`;
-  md += `> 说明：「中文要点 / 中文摘译」由免费机翻生成，措辞可能与原文有偏差；每篇均保留英文原文关键句以便核对。全球新闻池与实时检索（GDELT）条目仅提供标题与链接、无公开摘要，故只给出中文标题译名，不得据此推断正文内容。\n\n`;
-  items.forEach((it, k) => {
-    const a = it.a;
-    md += `### ${k+1}. ${it.zhTitle || a.title}\n\n`;
-    md += `- **来源**：${a.source}　|　**日期**：${fmtDate(a.date)}　|　**访问级别**：${a.access}\n`;
-    md += `- **原文标题**：${a.title}\n`;
-    md += `- **原文链接**：${a.link}\n`;
-    if(it.tags.length) md += `- **提炼标签**：${it.tags.join('、')}\n`;
-    if(it.keySents.length && it.zhExcerpt){
-      const ex = it.zhExcerpt.length > 420 ? it.zhExcerpt.slice(0,420) + '…' : it.zhExcerpt;
-      md += `- **中文要点**：${firstSentence(it.zhExcerpt)}\n`;
-      md += `- **中文摘译**：${ex}\n`;
-    }else if(!it.keySents.length){
-      const srcNote = a.origin === 'pool' ? '，来自全球新闻池'
-                    : a.origin === 'gdelt' ? '，来自实时检索' : '';
-      md += `- **中文要点**：${it.zhTitle || a.title}（该条目无公开摘要，仅提供标题与链接${srcNote}，不得据此推断正文内容）\n`;
-    }else{
-      md += `- **中文要点**：（机翻未成功，请见下方英文原文关键句）\n`;
-    }
-    it.keySents.forEach(s => { md += `  > 原文关键句：${s}\n`; });
-    md += `\n`;
-  });
-
-  md += `## 三、观点提炼与信号\n\n`;
-  md += `### 共识线索\n\n`;
-  if(shared.length){
-    md += `多篇报道共同聚焦：${shared.map(([w,c]) => `\`${w}\`（${c} 篇提及）`).join('、')}。` +
-          `这表明境外媒体对该话题的关注集中在上述维度，可作为研判主线。\n\n`;
-  }else{
-    md += `全部报道的高频词重叠度较低，议题分布较分散，尚不足以归纳出明确共识。建议聚焦单一子话题后再提炼。\n\n`;
-  }
-  md += `### 立场与侧重差异\n\n`;
-  const attEntries = Object.entries(attitude).sort((a,b) => b[1].size - a[1].size);
-  if(attEntries.length){
-    attEntries.forEach(([label, srcs]) => {
-      md += `- **${label}**：见于 ${[...srcs].slice(0,6).join('、')}${srcs.size>6?' 等':''} 的报道。\n`;
-    });
-  }else{
-    md += `- 未从公开摘要中识别出明显的态度词，立场差异需阅读全文后判断。\n`;
-  }
-  md += `\n`;
-  md += `### 值得关注的信号（数据 / 引语）\n\n`;
-  if(numbers.length){
-    numbers.slice(0,6).forEach(n => { md += `- ${n.src}：${n.text}\n`; });
-  }else{
-    md += `- 公开摘要中未提取到显著数字型信号。\n`;
-  }
-  md += `\n`;
-
-  if(transFail > 0){
-    md += `> ⚠ 本次有 ${transFail} 篇的摘译机翻未成功（网络波动或免费接口限额），已保留英文原文关键句。\n\n`;
-  }
-  return md;
-}
-
-/* ---------------- 总结提炼：LLM 增强 ---------------- */
-
-async function llmDigest(chosen, cfg){
-  const rec = state.record;
-  const base = (cfg.base || 'https://api.openai.com/v1').replace(/\/+$/,'');
-  const model = cfg.model || 'gpt-4o-mini';
-  const material = chosen.map((a,i) =>
-    `[${i+1}] 标题: ${a.title}\n来源: ${a.source} | 日期: ${fmtDate(a.date)} | 访问级别: ${a.access}\n` +
-    `公开摘要: ${(a.summary || '（无公开摘要，仅标题）').slice(0,320)}\n链接: ${a.link}`).join('\n\n');
-
-  const system = '你是一名专业的境外媒体舆情分析员，面向中文读者做摘译与提炼。'
-    + '严格依据给定材料，不得编造、补全或推测付费墙全文内容；对「仅标题/仅导语」的条目必须明确说明信息受限。'
-    + '输出为结构化中文 Markdown。';
-  const user = `话题：${rec.request.topic}（英文检索词：${rec.request.en_keywords}）\n`
-    + `共 ${chosen.length} 篇境外媒体报道（全部命中），材料如下（均为公开标题与公开摘要，非全文）：\n\n`
-    + material + `\n\n请完成：\n`
-    + `1. **提炼概览**：选样构成、来源分布、时间跨度、信息完整度；\n`
-    + `2. **逐篇中文摘译**：每条给出「中文标题 + 2-3 句核心观点摘译」，注明来源与日期；付费墙条目须标注「基于公开摘要」；\n`
-    + `3. **观点提炼**：归纳主流判断、立场分歧与共识，区分「有材料支撑」与「尚无法判断」；\n`
-    + `4. **值得关注的信号**：数字、直接引语、政策动向，逐条注明出处；\n`
-    + `5. **信息局限**：列出仅标题/仅导语的条目，说明哪些结论不能据此得出。\n`
-    + `不要输出材料之外的任何事实、数据或引语。`;
-
-  const r = await fetchWithTimeout(base + '/chat/completions', {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + cfg.key },
-    body: JSON.stringify({ model, messages:[{role:'system',content:system},{role:'user',content:user}], temperature:0.3 })
-  }, 60000);
-  if(!r.ok){
-    let detail = '';
-    try{ const d = await r.json(); detail = (d.error && d.error.message) || ''; }catch(e){}
-    throw new Error('HTTP ' + r.status + (detail ? '：' + detail.slice(0,120) : '') +
-      '（若为 CORS 报错，请改用支持跨域的兼容接口）');
-  }
-  const d = await r.json();
-  const content = d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-  if(!content) throw new Error('模型未返回内容');
-  return content.trim() + '\n';
-}
-
-/* ---------------- Markdown → HTML ---------------- */
-
-function inlineMd(s){
-  return esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-}
-function mdToHtml(md){
-  const lines = md.split('\n');
-  let out = '', i = 0;
-  while(i < lines.length){
-    const ln = lines[i];
-    if(/^```/.test(ln)){
-      let buf = []; i++;
-      while(i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
-      i++;
-      out += '<pre><code>' + esc(buf.join('\n')) + '</code></pre>'; continue;
-    }
-    if(/^\s*\|/.test(ln) && i+1 < lines.length && /^\s*\|[\s:|-]+\|/.test(lines[i+1])){
-      const rows = [];
-      while(i < lines.length && /^\s*\|/.test(lines[i])){ rows.push(lines[i]); i++; }
-      const cells = r => r.trim().replace(/^\||\|$/g,'').split('|').map(c => c.trim());
-      let t = '<table><thead><tr>' + cells(rows[0]).map(c => '<th>'+inlineMd(c)+'</th>').join('') + '</tr></thead><tbody>';
-      rows.slice(2).forEach(r => { t += '<tr>' + cells(r).map(c => '<td>'+inlineMd(c)+'</td>').join('') + '</tr>'; });
-      out += t + '</tbody></table>'; continue;
-    }
-    if(/^###\s+/.test(ln)){ out += '<h3>' + inlineMd(ln.replace(/^###\s+/,'')) + '</h3>'; i++; continue; }
-    if(/^##\s+/.test(ln)){  out += '<h2>' + inlineMd(ln.replace(/^##\s+/,''))  + '</h2>'; i++; continue; }
-    if(/^#\s+/.test(ln)){   out += '<h1>' + inlineMd(ln.replace(/^#\s+/,''))  + '</h1>'; i++; continue; }
-    if(/^>\s?/.test(ln)){
-      let buf = [];
-      while(i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/,''));
-      out += '<blockquote>' + inlineMd(buf.join(' ')) + '</blockquote>'; continue;
-    }
-    if(/^\s*[-*]\s+/.test(ln)){
-      let buf = [];
-      while(i < lines.length && /^\s*[-*]\s+/.test(lines[i])) buf.push(lines[i++].replace(/^\s*[-*]\s+/,''));
-      out += '<ul>' + buf.map(x => '<li>'+inlineMd(x)+'</li>').join('') + '</ul>'; continue;
-    }
-    if(/^---+\s*$/.test(ln)){ out += '<hr>'; i++; continue; }
-    if(!ln.trim()){ i++; continue; }
-    let para = [ln]; i++;
-    while(i < lines.length && lines[i].trim() && !/^(#|>|```|\||\s*[-*]\s|---)/.test(lines[i])) para.push(lines[i++]);
-    out += '<p>' + inlineMd(para.join(' ')) + '</p>';
-  }
-  return out;
-}
-
-/* 下载功能已按需求移除：总结提炼报告直接在页面「4 · 总结提炼结果」区完整呈现 */
-
-/* ---------------- AI 分析指令 ---------------- */
-
-function buildAIPrompt(rec){
-  return `请围绕话题「${rec.request.topic}」（英文检索词：${rec.request.en_keywords}）完成境外媒体舆情分析。\n`
-    + `素材：共 ${rec.stats.total} 篇报道 / ${rec.stats.media_count} 家来源，时间范围 ${TIMESPAN_LABEL[rec.request.timespan]}，`
-    + `其中 ${rec.stats.paywall_count} 篇需订阅（仅公开摘要可用）。\n\n`
-    + `请完成：\n1. 报道概览与热度：总量、来源构成、时间分布与走势；\n`
-    + `2. 关键报道摘译：挑选 8-12 篇给出中文摘译（标题译名 + 核心观点，注明来源与日期）；\n`
-    + `3. 观点提炼：主流判断、立场分歧、值得关注的信号。\n\n`
-    + `严格约束：仅依据公开标题与摘要，不得编造或补全付费墙全文内容；对「仅标题/仅导语」条目须明确标注信息受限。\n`
-    + `输出为结构化中文分析报告（Markdown）。`;
-}
-function togglePrompt(){ document.getElementById('promptBox').classList.toggle('hidden'); }
-function copyPrompt(){
-  const t = document.getElementById('aiPrompt');
-  t.select();
-  try{ document.execCommand('copy'); }catch(e){ navigator.clipboard && navigator.clipboard.writeText(t.value); }
-  const b = event && event.target;
-  if(b) { const old = b.textContent; b.textContent = '已复制 ✓'; setTimeout(()=>b.textContent=old, 1500); }
-}
+/* v2.4：总结提炼相关逻辑（LLM 设置 / 自动提炼 / 内置机翻算法 / 报告渲染 / AI 指令）已按需求整体移除 */
 
 /* ---------------- 初始化 ---------------- */
 
 document.getElementById('topic').addEventListener('keydown', ev => { if(ev.key === 'Enter') doSearch(); });
 loadHistory();
-fillLLM();
-fillAutoCfg();

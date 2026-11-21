@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Media Insight · 境外媒体舆情跟踪系统</title>
+<link rel="icon" href="data:,">
 <style>
 :root{
   --blue:#1a56db; --blue-dark:#1e40af; --bg:#f5f7fb; --card:#fff;
@@ -76,10 +77,9 @@ button{cursor:pointer;font-family:inherit;}
 .art h3 a:hover{color:var(--blue);text-decoration:underline;}
 .meta{margin:7px 0 0 0;font-size:12px;color:var(--muted);}
 .tag{display:inline-block;border-radius:4px;padding:1px 7px;font-size:11px;margin-right:6px;}
-.tag.rss{background:#dcfce7;color:#166534;} .tag.gdelt{background:#dbeafe;color:#1e40af;}
+.tag.rss{background:#dcfce7;color:#166534;}
 .tag.pool{background:#ede9fe;color:#5b21b6;}
 .tag.pay{background:#fef3c7;color:#92400e;} .tag.open{background:#f1f5f9;color:#475569;}
-.tag.digest{background:#ede9fe;color:#5b21b6;}
 .summ{margin:9px 0 0 0;font-size:13px;color:#374151;background:#f9fafb;
   border-left:3px solid #e5e7eb;padding:8px 11px;border-radius:0 6px 6px 0;}
 .card-actions{margin:9px 0 0 0;display:flex;gap:12px;flex-wrap:wrap;font-size:12px;}
@@ -88,29 +88,13 @@ button{cursor:pointer;font-family:inherit;}
 .notice{background:#fffbeb;border:1px solid #fde68a;color:#78350f;border-radius:8px;
   padding:10px 13px;font-size:12px;margin-top:12px;line-height:1.7;}
 .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;}
-#digestResult{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;
-  padding:16px 18px;margin-top:14px;font-size:13px;line-height:1.8;max-height:640px;overflow:auto;}
-#digestResult h2{font-size:16px;border-left:4px solid var(--blue);padding-left:10px;margin:20px 0 10px;}
-#digestResult h2:first-child{margin-top:0;}
-#digestResult h3{font-size:14px;margin:16px 0 6px;color:var(--blue-dark);}
-#digestResult table{border-collapse:collapse;width:100%;margin:10px 0;font-size:12px;}
-#digestResult td,#digestResult th{border:1px solid var(--line);padding:6px 9px;text-align:left;}
-#digestResult th{background:#eff6ff;}
-#digestResult blockquote{background:#f1f5f9;border-left:3px solid #94a3b8;
-  margin:8px 0;padding:7px 12px;color:#475569;}
-#digestResult code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px;}
-#digestResult ul{padding-left:20px;margin:6px 0;}
-#digestResult li{margin:3px 0;}
-.llm-grid{display:grid;grid-template-columns:1.4fr 1.4fr 1fr;gap:12px;margin-bottom:10px;}
-.llm-note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.7;}
-textarea.prompt{width:100%;min-height:150px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}
 .history-chip{display:inline-block;background:#f1f5f9;border:1px solid var(--line);border-radius:20px;
   padding:5px 13px;margin:4px 6px 0 0;font-size:12px;cursor:pointer;color:var(--text);}
 .history-chip:hover{background:#eff6ff;border-color:#93c5fd;color:var(--blue-dark);}
 .history-chip b{color:var(--blue-dark);}
 footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-height:1.9;}
 @media(max-width:760px){
-  .row,.row2,.stat-grid,.llm-grid{grid-template-columns:1fr 1fr;}
+  .row,.row2,.stat-grid{grid-template-columns:1fr 1fr;}
   .stat-grid{grid-template-columns:repeat(2,1fr);}
   .srcbar .nm{width:110px;}
 }
@@ -120,9 +104,9 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
 <div class="wrap">
 
 <header>
-  <h1><span>Media Insight</span> · 境外媒体舆情跟踪系统 <span class="badge">GitHub Pages 静态版</span><span class="badge ver" title="看到此版本标识即为最新版本">v2.3 · 2026-11-21</span></h1>
-  <div class="sub">输入话题 → <b>全球新闻池（境外服务器每 3 小时抓取，独立于 RSS 站）</b> → 自动提炼全部命中报道（逐篇中文摘译与要点）→ 结果直接在本页查看</div>
-  <div class="sub" style="margin-top:5px;font-size:12px;opacity:.85">若页面没有右上角的绿色版本标识、或仍显示旧的按钮，请按 <b>Ctrl + F5</b>（Mac 为 <b>Cmd + Shift + R</b>）强制刷新一次。</div>
+  <h1><span>Media Insight</span> · 境外媒体舆情跟踪系统 <span class="badge">GitHub Pages 静态版</span><span class="badge ver" title="看到此版本标识即为最新版本">v2.5 · 2026-11-21</span></h1>
+  <div class="sub">输入话题 → <b>检索全球新闻池（境外服务器每 3 小时抓取，独立于 RSS 站）</b> → <b>立即呈现报道清单与热度概览</b>（v2.5 已移除全量提炼与实时检索 GDELT，检索完无需等待）</div>
+  <div class="sub" style="margin-top:5px;font-size:12px;opacity:.85">若页面没有右上角的绿色版本标识、或仍显示旧的「总结提炼结果」「实时检索 GDELT」区块，请按 <b>Ctrl + F5</b>（Mac 为 <b>Cmd + Shift + R</b>）强制刷新一次。</div>
 </header>
 
 <div class="panel" id="historyPanel" style="padding:14px 20px">
@@ -168,7 +152,6 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
       <div class="checks" style="margin:8px 0 0">
         <label><input type="checkbox" id="srcPool" checked> <b>全球新闻池</b>（推荐 · 境外服务器抓取，独立于 RSS）</label>
         <label><input type="checkbox" id="srcRss"> RSS 精选源（可选 · 你的订阅快照）</label>
-        <label><input type="checkbox" id="srcGdelt"> 实时检索 GDELT（可选 · 国内常限流）</label>
       </div>
     </div>
   </div>
@@ -178,8 +161,8 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <span class="hint" id="dataNote" style="margin:0"></span>
   </div>
   <div class="hint" style="margin-top:8px">
-    <b>三类检索源的区别</b>：<b>全球新闻池</b>由本仓库的 GitHub Actions 每 3 小时在<b>境外服务器</b>抓取 GDELT 全球媒体库（覆盖地缘、经贸、科技、金融、能源、气候等 21 类长期话题），结果写入本仓库的 <code>news-data.json</code>；页面读取的是<b>自己网站里的文件</b>，不跨境、无 CORS 限制、不受 GDELT 5 秒限流影响，也<b>完全不触碰你的 my-rss-blog</b>。<b>RSS 精选源</b>是你订阅站公开的 <code>rss-data.json</code>，只按话题在本机筛选，只读 GET、本机缓存 2 小时并遵循源站 ETag。<b>实时检索 GDELT</b> 由访问者浏览器直接请求境外接口，国内网络下常被限流或不可达，失败会在概览如实提示。<br>
-    <b>只勾「全球新闻池」即可完全不依赖 RSS 检索境外新报道</b>（默认就是如此，清单带「全球新闻池」标签）。新闻池按预设话题定期抓取，冷门或突发话题可能尚未入池，此时可加勾「实时检索 GDELT」或稍后再试；数据生成时间显示在「2 · 报道概览与热度」。点「↻ 刷新数据源」会重新读取新闻池文件，只有勾选了 RSS 时才会额外请求你的订阅站。
+    <b>两类检索源的区别</b>：<b>全球新闻池</b>由本仓库的 GitHub Actions 每 3 小时在<b>境外服务器</b>抓取境外媒体库（覆盖地缘、经贸、科技、金融、能源、气候等 21 类长期话题），结果写入本仓库的 <code>news-data.json</code>；页面读取的是<b>自己网站里的文件</b>，不跨境、无 CORS 限制、不受境外接口限流影响，也<b>完全不触碰你的 my-rss-blog</b>。<b>RSS 精选源</b>是你订阅站公开的 <code>rss-data.json</code>，只按话题在本机筛选，只读 GET、本机缓存 2 小时并遵循源站 ETag。<br>
+    <b>只勾「全球新闻池」即可完全不依赖 RSS 检索境外新报道</b>（默认就是如此，清单带「全球新闻池」标签）。新闻池按预设话题定期抓取，冷门或突发话题可能尚未入池，此时可换个检索词或稍后再试（每 3 小时自动更新）；数据生成时间显示在「2 · 报道概览与热度」。点「↻ 刷新数据源」会重新读取新闻池文件，只有勾选了 RSS 时才会额外请求你的订阅站。
   </div>
 </div>
 
@@ -199,12 +182,12 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     <h2 class="sec">3 · 关键报道清单（<span id="artCount"></span> 篇，按相关度排序）</h2>
     <div class="filter-bar">
       <label><input type="checkbox" id="openOnly" onchange="renderArticles()"> 仅显示可公开访问</label>
-      <label><input type="checkbox" id="freshOnly" onchange="renderArticles()"> 仅看非 RSS 新报道（新闻池 + 实时检索）</label>
+      <label><input type="checkbox" id="freshOnly" onchange="renderArticles()"> 仅看非 RSS 新报道（全球新闻池）</label>
       <span class="sp"></span>
-      <span class="hint" style="margin:0">清单内全部报道已自动纳入提炼，无需选择</span>
+      <span class="hint" style="margin:0">检索完成即显示，无需等待提炼</span>
     </div>
     <div class="hint" style="margin:-4px 0 10px">
-      下方「4 · 总结提炼结果」会为<b>每一篇</b>生成中文标题、中文要点、中文摘译与英文原文关键句。带「全球新闻池」「实时检索 GDELT」标签的是 RSS 之外的境外新报道；这类条目原文只提供标题与链接、无公开摘要，故只给出中文标题译名，不据此推断正文。筛选只影响清单显示，不改变提炼范围。
+      清单按相关度排序，点击标题可打开原文；带「全球新闻池」标签的是 RSS 之外的境外新报道，这类条目只提供标题、来源与链接、无公开摘要，不据此推断正文。筛选只影响清单显示。
     </div>
     <div id="articles"></div>
     <div class="notice">
@@ -212,56 +195,14 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:26px;line-
     </div>
   </div>
 
-  <div class="panel" id="digestPanel">
-    <h2 class="sec">4 · 总结提炼结果 <span class="badge">检索后自动提炼全部报道</span></h2>
-    <div class="filter-bar">
-      <label><input type="checkbox" id="autoDigest" checked onchange="onAutoCfgChange()"> 检索后自动生成提炼</label>
-      <span class="sp"></span>
-      <button class="btn ghost sm" id="regenBtn" onclick="autoDigest(true)">↻ 重新生成全部</button>
-    </div>
-    <div class="hint" id="autoCfgNote" style="margin-bottom:8px"></div>
-    <div class="hint" id="digestHint">完成一次检索后，系统会为<b>全部命中报道</b>逐篇生成中文摘译与要点、共识线索与立场差异；报告直接在本区完整呈现，可向下滚动查看。</div>
-    <div id="digestResult" class="hidden"></div>
-  </div>
-
-  <div class="panel">
-    <h2 class="sec">5 · 高级设置</h2>
-    <div class="actions">
-      <button class="btn ghost" onclick="togglePrompt()">显示 AI 分析指令</button>
-      <button class="btn ghost" onclick="toggleLLM()">LLM 增强设置</button>
-    </div>
-
-    <div id="llmBox" class="hidden" style="margin-top:16px">
-      <h2 class="sec" style="font-size:14px">LLM 增强（可选）</h2>
-      <div class="hint" style="margin-bottom:10px">不填也能用：默认走内置免配置提炼。填写后自动生成提炼时会调用模型生成更高质量的中文摘译；篇数很多时模型可能超限，失败会自动降级为内置提炼并提示。</div>
-      <div class="llm-grid">
-        <div><label>API Base URL</label><input type="text" id="llmBase" placeholder="https://api.openai.com/v1"></div>
-        <div><label>API Key</label><input type="password" id="llmKey" placeholder="sk-..."></div>
-        <div><label>模型</label><input type="text" id="llmModel" placeholder="gpt-4o-mini"></div>
-      </div>
-      <div class="actions">
-        <button class="btn sm" onclick="saveLLM()">保存到本机</button>
-        <button class="btn ghost sm" onclick="clearLLM()">清除</button>
-        <span class="hint" id="llmState" style="align-self:center"></span>
-      </div>
-      <div class="llm-note">⚠️ Key 仅保存在你本机浏览器 localStorage，不会上传到本站点或任何服务器。<b>浏览器直连部分 LLM 服务可能受跨域（CORS）限制</b>；如遇失败，请改用支持 CORS 的兼容接口/代理，或直接使用内置提炼。</div>
-    </div>
-
-    <div id="promptBox" class="hidden" style="margin-top:16px">
-      <label>AI 分析指令（复制到任意 AI 对话，配合上方报告使用）</label>
-      <textarea id="aiPrompt" class="prompt" readonly></textarea>
-      <div class="actions" style="margin-top:8px"><button class="btn ghost sm" onclick="copyPrompt()">复制指令</button></div>
-    </div>
-  </div>
-
 </section>
 
 <footer>
-  数据源：全球新闻池（GitHub Actions 境外抓取 · 同域 news-data.json） · 可选 RSS 精选聚合站（只读 GET） · 可选 GDELT 实时检索 · Google gtx / MyMemory 翻译接口<br>
-  静态托管于 GitHub Pages，独立仓库、独立站点；页面无服务端，检索与提炼均在访问者浏览器内完成。新闻池抓取与写库由 GitHub Actions 在本仓库内完成，不会改变 my-rss-blog 的运行方式。
+  数据源：全球新闻池（GitHub Actions 境外抓取 · 同域 news-data.json） · 可选 RSS 精选聚合站（只读 GET） · Google gtx / MyMemory（仅用于把中文话题译成英文检索词）<br>
+  静态托管于 GitHub Pages，独立仓库、独立站点；页面无服务端，检索与筛选均在访问者浏览器内完成。新闻池抓取与写库由 GitHub Actions 在本仓库内完成，不会改变 my-rss-blog 的运行方式。
 </footer>
 
 </div>
-<script src="app.js?v=20261121a"></script>
+<script src="app.js?v=20261121c"></script>
 </body>
 </html>
