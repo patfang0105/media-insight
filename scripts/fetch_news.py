@@ -229,7 +229,16 @@ def main():
     # 本地首次生成初始数据时可用 MI_MAX_TOPICS 限制话题数，加快速度；
     # GitHub Actions 定时运行时不设置该变量，跑完整话题表。
     limit = int(os.environ.get('MI_MAX_TOPICS', '0') or '0')
-    todo = TOPICS[:limit] if 0 < limit < len(TOPICS) else TOPICS
+    todo = list(TOPICS[:limit] if 0 < limit < len(TOPICS) else TOPICS)
+    # 轮换起始话题：GDELT 限流时单轮可能跑不完 21 个话题，
+    # 按 GitHub 运行序号轮换后，多轮运行仍能覆盖全部主题。
+    try:
+        run_no = int(os.environ.get('GITHUB_RUN_NUMBER', '0') or '0')
+    except ValueError:
+        run_no = 0
+    off = run_no % len(todo) if todo else 0
+    if off:
+        todo = todo[off:] + todo[:off]
 
     # 先把旧数据放入池子（保证本次就算全失败也有内容）
     for a in old:
@@ -240,7 +249,7 @@ def main():
     started = time.monotonic()
     for i, (label, query, kw, gq) in enumerate(todo):
         if time.monotonic() - started > MAX_SECONDS:
-            warnings.append('达到单次运行时间预算，剩余话题留待下一轮抓取。')
+            warnings.append('本轮已完成 %d 类话题抓取，其余话题将在下一轮自动补齐（每 3 小时轮换）。' % ok_topics)
             break
         if i:
             time.sleep(GAP)
@@ -296,7 +305,10 @@ def main():
     articles = [a for a in pool.values() if in_range(a)]
     articles.sort(key=lambda a: a.get('date') or '', reverse=True)
     if len(articles) > MAX_TOTAL:
-        articles = articles[:MAX_TOTAL]
+        # 带公开摘要的条目更珍贵（页面可据此生成中文摘译），优先保留不被截断
+        with_sum = [a for a in articles if (a.get('summary') or '').strip()][:80]
+        rest = [a for a in articles if not (a.get('summary') or '').strip()][:MAX_TOTAL - len(with_sum)]
+        articles = sorted(with_sum + rest, key=lambda a: a.get('date') or '', reverse=True)
 
     stale = ok_topics == 0 and len(old) > 0
     prev_generated = ''
